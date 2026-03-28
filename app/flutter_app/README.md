@@ -1,17 +1,13 @@
-# rtxhdr_rtxvsr
+# Flutter Windows 客户端
 
-A new Flutter project.
+这是 `RTXHDR+RTXVSR` 的 Flutter Windows 桌面端。
 
-## Getting Started
+主要职责：
 
-This project is a starting point for a Flutter application.
+- 提供导出参数配置界面
+- 展示系统能力探测结果
+- 通过 FFI 调用原生 `rtx_native.dll`
+- 轮询任务进度、日志与错误信息
+- 自动保存并恢复上次使用的导出选项
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+如果你想了解完整项目说明、依赖准备和构建方式，请优先阅读仓库根目录下的 `README.md`。
