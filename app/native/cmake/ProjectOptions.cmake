@@ -1,0 +1,11 @@
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(MSVC)
+  add_compile_options(/W4 /EHsc /permissive- /Zc:__cplusplus /utf-8)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+else()
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
