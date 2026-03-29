@@ -40,6 +40,16 @@ New-Item -ItemType Directory -Force -Path $bundleRoot | Out-Null
 
 Copy-Item -Path (Join-Path $releaseRoot '*') -Destination $bundleRoot -Recurse -Force
 
+# Include license and attribution files in the portable bundle
+$licenseFiles = @('THIRD_PARTY_LICENSES.md', 'LICENSE')
+foreach ($licenseFile in $licenseFiles) {
+  $sourcePath = Join-Path $repoRoot $licenseFile
+  if (Test-Path $sourcePath) {
+    Copy-Item -Path $sourcePath -Destination $bundleRoot -Force
+    Write-Host "Included $licenseFile in portable bundle."
+  }
+}
+
 if (Test-Path $bundleZip) {
   Remove-Item -Force $bundleZip
 }

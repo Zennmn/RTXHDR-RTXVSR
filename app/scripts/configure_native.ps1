@@ -38,26 +38,29 @@ if (-not $cmakeExe) {
 
 $ffmpegRoot = Resolve-FirstExistingPath @(
   $env:FFMPEG_ROOT,
+  (Join-Path $repoRoot 'deps\ffmpeg'),
   'C:\Program Files (x86)\ffmpeg-N-122395-g48c9c38684-win64-gpl-shared'
 )
 if (-not $ffmpegRoot) {
-  throw 'Unable to locate FFmpeg root. Set FFMPEG_ROOT.'
+  throw 'Unable to locate FFmpeg root. Run bootstrap_windows.ps1 or set FFMPEG_ROOT.'
 }
 
 $sdkRoot = Resolve-FirstExistingPath @(
   $env:NV_RTX_VIDEO_SDK,
-  (Join-Path $repoRoot 'RTX_Video_SDK_v1.1.0')
+  (Join-Path $repoRoot 'RTX_Video_SDK_v1.1.0'),
+  (Join-Path $repoRoot 'deps\RTX_Video_SDK_v1.1.0')
 )
 if (-not $sdkRoot) {
-  throw 'Unable to locate NVIDIA RTX Video SDK root.'
+  throw 'Unable to locate NVIDIA RTX Video SDK root. See: https://developer.nvidia.com/rtx-video-sdk'
 }
 
 $codecRoot = Resolve-FirstExistingPath @(
   $env:NV_VIDEO_CODEC_INTERFACE,
-  (Join-Path $repoRoot 'Video_Codec_Interface_13.0.37')
+  (Join-Path $repoRoot 'Video_Codec_Interface_13.0.37'),
+  (Join-Path $repoRoot 'deps\Video_Codec_Interface_13.0.37')
 )
 if (-not $codecRoot) {
-  throw 'Unable to locate NVIDIA Video Codec Interface root.'
+  throw 'Unable to locate NVIDIA Video Codec Interface root. See: https://developer.nvidia.com/video-codec-sdk'
 }
 
 & $cmakeExe `

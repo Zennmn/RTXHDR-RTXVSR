@@ -1,7 +1,8 @@
 set(_rtx_sdk_hints
   "${NV_RTX_VIDEO_SDK}"
   "$ENV{NV_RTX_VIDEO_SDK}"
-  "${CMAKE_SOURCE_DIR}/../../RTX_Video_SDK_v1.1.0")
+  "${CMAKE_SOURCE_DIR}/../../RTX_Video_SDK_v1.1.0"
+  "${CMAKE_SOURCE_DIR}/../../deps/RTX_Video_SDK_v1.1.0")
 
 find_path(NvidiaRtxVideoSdk_INCLUDE_DIR
   NAMES nvsdk_ngx.h

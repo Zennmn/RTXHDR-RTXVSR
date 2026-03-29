@@ -4,6 +4,7 @@ include(cmake/FindVideoCodecInterface.cmake)
 set(_ffmpeg_hints
   "${FFMPEG_ROOT}"
   "$ENV{FFMPEG_ROOT}"
+  "${CMAKE_SOURCE_DIR}/../../deps/ffmpeg"
   "C:/Program Files (x86)/ffmpeg-N-122395-g48c9c38684-win64-gpl-shared")
 
 find_path(FFMPEG_INCLUDE_DIR

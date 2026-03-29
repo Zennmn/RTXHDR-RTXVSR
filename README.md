@@ -10,6 +10,17 @@
 - HEVC / AV1 硬件编码导出
 - 任务进度、日志、ETA 与错误信息可视化
 
+## 下载
+
+前往 [Releases](https://github.com/Zennmn/RTXHDR-RTXVSR/releases) 页面下载最新的 Windows 便携版。
+
+**系统要求：**
+
+- Windows 10 / 11 x64
+- NVIDIA RTX 显卡
+- 较新版本的 NVIDIA 显卡驱动
+
+下载后解压即可运行，无需安装。
 ## 项目状态
 
 这是一个偏工程原型阶段的 Windows 桌面项目，已经具备完整的基本链路：
@@ -167,9 +178,28 @@ $env:CMAKE_EXE = 'C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Commo
 
 如果你希望长期生效，可以把这些环境变量写入系统环境变量，或者根据你自己的开发环境封装一个本地启动脚本。
 
-## 从源码运行教程
+## 快速开始（推荐）
 
-下面是一套建议的最小流程。
+```powershell
+git clone https://github.com/Zennmn/RTXHDR-RTXVSR.git
+cd RTXHDR-RTXVSR
+pwsh ./app/scripts/bootstrap_windows.ps1
+```
+
+`bootstrap_windows.ps1` 会自动完成：
+
+- ✅ 下载 FFmpeg LGPL shared 构建（从 BtbN GitHub Releases）
+- ⚠️ 检测 NVIDIA RTX Video SDK（需手动下载，脚本会给出指引）
+- ⚠️ 检测 NVIDIA Video Codec Interface（需手动下载，脚本会给出指引）
+- ✅ 检测 CUDA Toolkit
+- ✅ 检测 Flutter SDK
+- ✅ 自动执行原生构建
+
+唯一需要手动操作的是从 NVIDIA 开发者网站下载 RTX Video SDK（需登录账号）。
+
+## 从源码运行教程（手动方式）
+
+如果你更喜欢手动配置，以下是完整流程。
 
 ### 1. 克隆仓库
 
@@ -183,12 +213,13 @@ cd RTXHDR-RTXVSR
 你需要确保以下目录在本机真实存在：
 
 - Flutter SDK 根目录
-- FFmpeg 根目录
+- FFmpeg 根目录（**建议使用 LGPL shared 构建**）
   - 应包含 `include`、`lib`、`bin`
 - NVIDIA RTX Video SDK 根目录
 - NVIDIA Video Codec Interface 根目录
 
-如果这些依赖不在本项目脚本默认搜索的位置，请先设置环境变量。
+依赖可以放在项目根目录或 `deps/` 目录下，脚本会自动搜索。
+也可以通过环境变量显式指定路径。
 
 ### 3. 构建原生 DLL
 
@@ -372,6 +403,19 @@ pwsh ./app/scripts/package_runtime.ps1
 
 - 本仓库源码许可不自动覆盖第三方依赖的许可
 - 使用 FFmpeg、CUDA、NVIDIA RTX Video SDK、Video Codec Interface 时，需要你自行遵守对应上游许可与再分发条款
+- 完整的第三方许可声明请参见 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md)
+
+## 第三方组件
+
+| 组件 | 许可证 | 说明 |
+|------|--------|------|
+| [FFmpeg](https://ffmpeg.org/) | LGPL 2.1+ | 动态链接，源码见 [GitHub](https://github.com/FFmpeg/FFmpeg) |
+| [NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) | NVIDIA EULA | GPU 计算 |
+| [NVIDIA RTX Video SDK](https://developer.nvidia.com/rtx-video-sdk) | NVIDIA SDK License | VSR + TrueHDR |
+| [nv-codec-headers](https://github.com/FFmpeg/nv-codec-headers) | MIT | 硬件编解码接口头文件 |
+| [Flutter](https://flutter.dev/) | BSD 3-Clause | 桌面 UI 框架 |
+
+本项目并非由 NVIDIA Corporation 赞助或认可。
 
 ## 致谢
 

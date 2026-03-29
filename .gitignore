@@ -6,6 +6,7 @@ $installRoot/
 build/
 out/
 dist/
+deps/
 RTX_Video_SDK_v1.1.0/
 Video_Codec_Interface_13.0.37/
 
