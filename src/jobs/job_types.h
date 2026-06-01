@@ -86,6 +86,12 @@ struct JobSnapshot {
     std::chrono::system_clock::time_point updated_at{};
 };
 
+// Internal store record. API DTOs should serialize JobSnapshot, not the full request.
+struct JobRecord {
+    TranscodeRequest request;
+    JobSnapshot snapshot;
+};
+
 struct CancellationToken {
     std::atomic_bool requested{false};
 };
