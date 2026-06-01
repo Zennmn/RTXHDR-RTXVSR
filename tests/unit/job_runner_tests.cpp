@@ -3,8 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <utility>
 
 using namespace vsr;
@@ -64,6 +67,36 @@ public:
 
 private:
     std::function<void()> cancel_;
+};
+
+class ConcurrentProbePipeline final : public VideoPipeline {
+public:
+    ConcurrentProbePipeline(std::atomic<int>& active, std::atomic<int>& max_active)
+        : active_(active), max_active_(max_active) {}
+
+    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback progress) override {
+        const int active = active_.fetch_add(1) + 1;
+        record_max(active);
+
+        JobProgress snapshot;
+        snapshot.stage = JobStage::encoding;
+        snapshot.progress = 0.5;
+        progress(snapshot);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        active_.fetch_sub(1);
+        return Result<void>::Ok();
+    }
+
+private:
+    void record_max(int value) {
+        int current = max_active_.load();
+        while (current < value && !max_active_.compare_exchange_weak(current, value)) {
+        }
+    }
+
+    std::atomic<int>& active_;
+    std::atomic<int>& max_active_;
 };
 
 } // namespace
@@ -191,4 +224,40 @@ TEST(JobRunner, cancellationRequestedBeforePipelineSuccessWinsFinalState) {
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error().code, "job_canceled");
     EXPECT_EQ(store.get(id).value().state, JobState::canceled);
+}
+
+TEST(JobRunner, serializesConcurrentRunOneCallsAcrossSharedPipeline) {
+    JobStore store;
+    std::atomic<int> active{0};
+    std::atomic<int> max_active{0};
+    auto pipeline = std::make_unique<ConcurrentProbePipeline>(active, max_active);
+    JobRunner runner(store, std::move(pipeline));
+    const auto first_id = store.create(valid_request()).value();
+    const auto second_id = store.create(valid_request()).value();
+    std::atomic_bool start{false};
+    std::atomic_bool first_ok{false};
+    std::atomic_bool second_ok{false};
+
+    std::thread first([&]() {
+        while (!start.load()) {
+            std::this_thread::yield();
+        }
+        first_ok.store(runner.run_one(first_id).ok());
+    });
+    std::thread second([&]() {
+        while (!start.load()) {
+            std::this_thread::yield();
+        }
+        second_ok.store(runner.run_one(second_id).ok());
+    });
+
+    start.store(true);
+    first.join();
+    second.join();
+
+    EXPECT_TRUE(first_ok.load());
+    EXPECT_TRUE(second_ok.load());
+    EXPECT_EQ(max_active.load(), 1);
+    EXPECT_EQ(store.get(first_id).value().state, JobState::succeeded);
+    EXPECT_EQ(store.get(second_id).value().state, JobState::succeeded);
 }

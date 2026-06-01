@@ -6,6 +6,8 @@ JobRunner::JobRunner(JobStore& store, std::unique_ptr<VideoPipeline> pipeline)
     : store_(store), pipeline_(std::move(pipeline)) {}
 
 Result<void> JobRunner::run_one(const std::string& id) {
+    std::lock_guard lock(run_mutex_);
+
     const auto request = store_.start(id);
     if (!request.ok()) {
         return Result<void>::Fail(request.error());

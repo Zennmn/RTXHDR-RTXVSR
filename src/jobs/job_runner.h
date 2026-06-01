@@ -4,6 +4,7 @@
 #include "video/video_pipeline.h"
 
 #include <memory>
+#include <mutex>
 
 namespace vsr {
 
@@ -13,6 +14,7 @@ public:
     Result<void> run_one(const std::string& id);
 
 private:
+    std::mutex run_mutex_;
     JobStore& store_;
     std::unique_ptr<VideoPipeline> pipeline_;
 };
