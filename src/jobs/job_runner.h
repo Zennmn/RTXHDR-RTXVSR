@@ -10,7 +10,7 @@ namespace vsr {
 class JobRunner {
 public:
     JobRunner(JobStore& store, std::unique_ptr<VideoPipeline> pipeline);
-    void run_one(const std::string& id);
+    Result<void> run_one(const std::string& id);
 
 private:
     JobStore& store_;

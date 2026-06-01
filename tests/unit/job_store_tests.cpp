@@ -57,6 +57,22 @@ TEST(JobStore, preservesFullOriginalRequestForRunner) {
     EXPECT_EQ(stored.value().output.subtitle_mode, "none");
 }
 
+TEST(JobStore, startTransitionsQueuedJobToRunningAndReturnsStoredRequest) {
+    JobStore store;
+    auto request = valid_request();
+    request.processing.vsr.quality = 4;
+    request.processing.vsr.scale = 3.25;
+    request.output.video_codec = "h264";
+    const auto id = store.create(request).value();
+
+    const auto started = store.start(id);
+
+    ASSERT_TRUE(started.ok()) << started.error().message;
+    EXPECT_EQ(started.value().processing.vsr.quality, 4);
+    EXPECT_DOUBLE_EQ(started.value().processing.vsr.scale, 3.25);
+    EXPECT_EQ(store.get(id).value().state, JobState::running);
+}
+
 TEST(JobStore, rejectsInvalidRequestWithoutStoringJob) {
     JobStore store;
     TranscodeRequest request;
@@ -100,4 +116,96 @@ TEST(JobStore, supportsCancellationState) {
 
     EXPECT_TRUE(store.is_cancel_requested(id));
     EXPECT_EQ(store.get(id).value().state, JobState::canceling);
+}
+
+TEST(JobStore, markRunningDoesNotOverwriteCancelingState) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.request_cancel(id).ok());
+
+    const auto running = store.mark_running(id);
+
+    ASSERT_FALSE(running.ok());
+    EXPECT_EQ(running.error().code, "job_canceled");
+    EXPECT_EQ(store.get(id).value().state, JobState::canceling);
+}
+
+TEST(JobStore, startCancelsPreCanceledQueuedJobWithoutReturningRequest) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.request_cancel(id).ok());
+
+    const auto started = store.start(id);
+
+    ASSERT_FALSE(started.ok());
+    EXPECT_EQ(started.error().code, "job_canceled");
+    const auto snapshot = store.get(id).value();
+    EXPECT_EQ(snapshot.state, JobState::canceled);
+    EXPECT_EQ(snapshot.error_code, "job_canceled");
+}
+
+TEST(JobStore, terminalSucceededJobIsImmutableForStateMutations) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.mark_running(id).ok());
+    ASSERT_TRUE(store.mark_succeeded(id).ok());
+
+    JobProgress late_progress;
+    late_progress.stage = JobStage::muxing;
+    late_progress.progress = 0.25;
+
+    EXPECT_FALSE(store.request_cancel(id).ok());
+    EXPECT_FALSE(store.mark_running(id).ok());
+    EXPECT_FALSE(store.update_progress(id, late_progress).ok());
+    EXPECT_FALSE(store.mark_succeeded(id).ok());
+    EXPECT_FALSE(store.mark_failed(id, {"late_error", "Late error.", ""}).ok());
+
+    const auto snapshot = store.get(id).value();
+    EXPECT_EQ(snapshot.state, JobState::succeeded);
+    EXPECT_DOUBLE_EQ(snapshot.progress.progress, 1.0);
+    EXPECT_TRUE(snapshot.error_code.empty());
+}
+
+TEST(JobStore, terminalFailedJobIsImmutableForStateMutations) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.mark_running(id).ok());
+    ASSERT_TRUE(store.mark_failed(id, {"transcode_failed", "Transcode failed.", "unit test"}).ok());
+
+    JobProgress late_progress;
+    late_progress.stage = JobStage::muxing;
+    late_progress.progress = 0.75;
+
+    EXPECT_FALSE(store.request_cancel(id).ok());
+    EXPECT_FALSE(store.mark_running(id).ok());
+    EXPECT_FALSE(store.update_progress(id, late_progress).ok());
+    EXPECT_FALSE(store.mark_succeeded(id).ok());
+    EXPECT_FALSE(store.mark_failed(id, {"late_error", "Late error.", ""}).ok());
+
+    const auto snapshot = store.get(id).value();
+    EXPECT_EQ(snapshot.state, JobState::failed);
+    EXPECT_EQ(snapshot.error_code, "transcode_failed");
+    EXPECT_DOUBLE_EQ(snapshot.progress.progress, 0.0);
+}
+
+TEST(JobStore, terminalCanceledJobIsImmutableForStateMutations) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.request_cancel(id).ok());
+    ASSERT_FALSE(store.start(id).ok());
+
+    JobProgress late_progress;
+    late_progress.stage = JobStage::muxing;
+    late_progress.progress = 0.75;
+
+    EXPECT_FALSE(store.request_cancel(id).ok());
+    EXPECT_FALSE(store.mark_running(id).ok());
+    EXPECT_FALSE(store.update_progress(id, late_progress).ok());
+    EXPECT_FALSE(store.mark_succeeded(id).ok());
+    EXPECT_FALSE(store.mark_failed(id, {"late_error", "Late error.", ""}).ok());
+
+    const auto snapshot = store.get(id).value();
+    EXPECT_EQ(snapshot.state, JobState::canceled);
+    EXPECT_EQ(snapshot.error_code, "job_canceled");
+    EXPECT_DOUBLE_EQ(snapshot.progress.progress, 0.0);
 }

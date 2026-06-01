@@ -5,17 +5,19 @@ namespace vsr {
 JobRunner::JobRunner(JobStore& store, std::unique_ptr<VideoPipeline> pipeline)
     : store_(store), pipeline_(std::move(pipeline)) {}
 
-void JobRunner::run_one(const std::string& id) {
-    const auto request = store_.get_request(id);
-    if (!request.ok() || pipeline_ == nullptr) {
-        return;
+Result<void> JobRunner::run_one(const std::string& id) {
+    const auto request = store_.start(id);
+    if (!request.ok()) {
+        return Result<void>::Fail(request.error());
     }
 
-    const bool cancel_requested = store_.is_cancel_requested(id);
-    store_.mark_running(id);
+    if (pipeline_ == nullptr) {
+        Error error{"pipeline_unavailable", "Video pipeline is not available.", ""};
+        store_.mark_failed(id, error);
+        return Result<void>::Fail(error);
+    }
 
     CancellationToken cancellation;
-    cancellation.requested.store(cancel_requested);
 
     const auto result = pipeline_->run(
         request.value(),
@@ -25,10 +27,14 @@ void JobRunner::run_one(const std::string& id) {
         });
 
     if (result.ok()) {
-        store_.mark_succeeded(id);
-    } else {
-        store_.mark_failed(id, result.error());
+        return store_.mark_succeeded(id);
     }
+
+    const auto marked = store_.mark_failed(id, result.error());
+    if (!marked.ok()) {
+        return marked;
+    }
+    return Result<void>::Fail(result.error());
 }
 
 } // namespace vsr

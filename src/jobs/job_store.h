@@ -16,6 +16,7 @@ public:
     Result<JobSnapshot> get(const std::string& id) const;
     Result<TranscodeRequest> get_request(const std::string& id) const;
     Result<JobRecord> get_record(const std::string& id) const;
+    Result<TranscodeRequest> start(const std::string& id);
     Result<void> mark_running(const std::string& id);
     Result<void> update_progress(const std::string& id, const JobProgress& progress);
     Result<void> mark_succeeded(const std::string& id);

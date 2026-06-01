@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <memory>
+#include <utility>
 
 using namespace vsr;
 
@@ -37,6 +39,33 @@ public:
     TranscodeRequest observed_request;
 };
 
+class CountingPipeline final : public VideoPipeline {
+public:
+    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback) override {
+        ++calls;
+        return Result<void>::Ok();
+    }
+
+    int calls = 0;
+};
+
+class CancelBeforeSuccessPipeline final : public VideoPipeline {
+public:
+    explicit CancelBeforeSuccessPipeline(std::function<void()> cancel) : cancel_(std::move(cancel)) {}
+
+    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback progress) override {
+        JobProgress snapshot;
+        snapshot.stage = JobStage::encoding;
+        snapshot.progress = 0.5;
+        progress(snapshot);
+        cancel_();
+        return Result<void>::Ok();
+    }
+
+private:
+    std::function<void()> cancel_;
+};
+
 } // namespace
 
 TEST(JobRunner, completesFakePipelineJob) {
@@ -46,8 +75,9 @@ TEST(JobRunner, completesFakePipelineJob) {
 
     const auto id = store.create(valid_request()).value();
 
-    runner.run_one(id);
+    const auto result = runner.run_one(id);
 
+    ASSERT_TRUE(result.ok()) << result.error().message;
     const auto snapshot = store.get(id).value();
     EXPECT_EQ(snapshot.state, JobState::succeeded);
     EXPECT_DOUBLE_EQ(snapshot.progress.progress, 1.0);
@@ -61,8 +91,10 @@ TEST(JobRunner, recordsFakePipelineFailure) {
 
     const auto id = store.create(valid_request()).value();
 
-    runner.run_one(id);
+    const auto result = runner.run_one(id);
 
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "fake_pipeline_failed");
     const auto snapshot = store.get(id).value();
     EXPECT_EQ(snapshot.state, JobState::failed);
     EXPECT_EQ(snapshot.error_code, "fake_pipeline_failed");
@@ -87,8 +119,9 @@ TEST(JobRunner, passesOriginalProcessingAndOutputSettingsToPipeline) {
     request.output.subtitle_mode = "none";
     const auto id = store.create(request).value();
 
-    runner.run_one(id);
+    const auto result = runner.run_one(id);
 
+    ASSERT_TRUE(result.ok()) << result.error().message;
     ASSERT_TRUE(spy->called);
     EXPECT_EQ(spy->observed_request.input_path, request.input_path);
     EXPECT_EQ(spy->observed_request.output_path, request.output_path);
@@ -102,4 +135,60 @@ TEST(JobRunner, passesOriginalProcessingAndOutputSettingsToPipeline) {
     EXPECT_EQ(spy->observed_request.output.video_codec, "hevc");
     EXPECT_EQ(spy->observed_request.output.audio_mode, "transcode");
     EXPECT_EQ(spy->observed_request.output.subtitle_mode, "none");
+}
+
+TEST(JobRunner, returnsMissingJobError) {
+    JobStore store;
+    auto pipeline = std::make_unique<FakePipeline>(FakePipelineMode::succeeds);
+    JobRunner runner(store, std::move(pipeline));
+
+    const auto result = runner.run_one("missing-job");
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "job_not_found");
+}
+
+TEST(JobRunner, marksExistingJobFailedWhenPipelineUnavailable) {
+    JobStore store;
+    JobRunner runner(store, nullptr);
+    const auto id = store.create(valid_request()).value();
+
+    const auto result = runner.run_one(id);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "pipeline_unavailable");
+    const auto snapshot = store.get(id).value();
+    EXPECT_EQ(snapshot.state, JobState::failed);
+    EXPECT_EQ(snapshot.error_code, "pipeline_unavailable");
+}
+
+TEST(JobRunner, preCanceledQueuedJobDoesNotRunPipelineAndBecomesCanceled) {
+    JobStore store;
+    auto pipeline = std::make_unique<CountingPipeline>();
+    auto* counting = pipeline.get();
+    JobRunner runner(store, std::move(pipeline));
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.request_cancel(id).ok());
+
+    const auto result = runner.run_one(id);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "job_canceled");
+    EXPECT_EQ(counting->calls, 0);
+    EXPECT_EQ(store.get(id).value().state, JobState::canceled);
+}
+
+TEST(JobRunner, cancellationRequestedBeforePipelineSuccessWinsFinalState) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    auto pipeline = std::make_unique<CancelBeforeSuccessPipeline>([&store, id]() {
+        store.request_cancel(id);
+    });
+    JobRunner runner(store, std::move(pipeline));
+
+    const auto result = runner.run_one(id);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "job_canceled");
+    EXPECT_EQ(store.get(id).value().state, JobState::canceled);
 }
