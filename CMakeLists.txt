@@ -104,12 +104,24 @@ endif()
 
 if(VSR_ENABLE_RTX_SDK)
   set(_vsr_rtx_dx11_source "${VSR_RTX_SDK_ROOT}/samples/RTX_Video_API/rtx_video_api_dx11_impl.cpp")
+  set(_vsr_rtx_wrapper_source "${CMAKE_CURRENT_SOURCE_DIR}/src/video/rtx/rtx_dx11_processor.cpp")
   set(_vsr_rtx_ngx_lib "${VSR_RTX_SDK_ROOT}/lib/Windows/x64/nvsdk_ngx_s.lib")
+  set(_vsr_rtx_vsr_dll "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_vsr.dll")
+  set(_vsr_rtx_truehdr_dll "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_truehdr.dll")
   if(NOT EXISTS "${_vsr_rtx_dx11_source}")
     message(FATAL_ERROR "RTX Video SDK DX11 source not found: ${_vsr_rtx_dx11_source}")
   endif()
+  if(NOT EXISTS "${_vsr_rtx_wrapper_source}")
+    message(FATAL_ERROR "RTX DX11 processor source not found: ${_vsr_rtx_wrapper_source}")
+  endif()
   if(NOT EXISTS "${_vsr_rtx_ngx_lib}")
     message(FATAL_ERROR "RTX Video SDK NGX library not found: ${_vsr_rtx_ngx_lib}")
+  endif()
+  if(NOT EXISTS "${_vsr_rtx_vsr_dll}")
+    message(FATAL_ERROR "RTX Video VSR runtime DLL not found: ${_vsr_rtx_vsr_dll}")
+  endif()
+  if(NOT EXISTS "${_vsr_rtx_truehdr_dll}")
+    message(FATAL_ERROR "RTX Video TrueHDR runtime DLL not found: ${_vsr_rtx_truehdr_dll}")
   endif()
 
   add_library(rtx_video_api_dx11 STATIC
@@ -126,9 +138,7 @@ if(VSR_ENABLE_RTX_SDK)
   )
   target_compile_definitions(rtx_video_api_dx11 PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/video/rtx/rtx_dx11_processor.cpp")
-    target_sources(vsr_backend_core PRIVATE src/video/rtx/rtx_dx11_processor.cpp)
-  endif()
+  target_sources(vsr_backend_core PRIVATE "${_vsr_rtx_wrapper_source}")
   target_include_directories(vsr_backend_core PRIVATE "${VSR_RTX_SDK_ROOT}/samples/RTX_Video_API")
   target_link_libraries(vsr_backend_core PRIVATE rtx_video_api_dx11 d3d11 dxgi)
   target_compile_definitions(vsr_backend_core PUBLIC VSR_ENABLE_RTX_SDK=1)
@@ -140,10 +150,10 @@ target_link_libraries(vsr_backend PRIVATE vsr_backend_core)
 if(VSR_ENABLE_RTX_SDK)
   add_custom_command(TARGET vsr_backend POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_vsr.dll"
+      "${_vsr_rtx_vsr_dll}"
       "$<TARGET_FILE_DIR:vsr_backend>/nvngx_vsr.dll"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_truehdr.dll"
+      "${_vsr_rtx_truehdr_dll}"
       "$<TARGET_FILE_DIR:vsr_backend>/nvngx_truehdr.dll"
   )
 endif()
