@@ -80,6 +80,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/api/http_server.cpp")
   target_link_libraries(vsr_backend_core PUBLIC httplib::httplib)
 endif()
 
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/capabilities.cpp")
+  target_link_libraries(vsr_backend_core PRIVATE d3d11)
+endif()
+
 if(VSR_ENABLE_FFMPEG)
   find_package(FFmpeg REQUIRED)
   foreach(_source IN ITEMS

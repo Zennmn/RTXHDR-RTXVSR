@@ -1,6 +1,7 @@
 #include "api/http_server.h"
 
 #include "api/json_dto.h"
+#include "platform/capabilities.h"
 
 #include <nlohmann/json.hpp>
 
@@ -68,6 +69,10 @@ void HttpServer::stop() {
 void HttpServer::bind_routes() {
     server_.Get("/api/health", [](const httplib::Request&, httplib::Response& response) {
         set_json(response, {{"version", "0.1.0"}, {"ready", true}});
+    });
+
+    server_.Get("/api/capabilities", [](const httplib::Request&, httplib::Response& response) {
+        set_json(response, capability_snapshot_to_json(detect_capabilities()));
     });
 
     server_.Post("/api/jobs", [this](const httplib::Request& request, httplib::Response& response) {
