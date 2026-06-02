@@ -1,9 +1,20 @@
 cmake_minimum_required(VERSION 3.25)
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+if(POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
+endif()
+
 project(rtx_video_backend LANGUAGES CXX)
 
 option(VSR_ENABLE_TESTS "Build unit tests" ON)
 option(VSR_ENABLE_FFMPEG "Build FFmpeg transcode pipeline" OFF)
 option(VSR_ENABLE_RTX_SDK "Build NVIDIA RTX Video SDK integration" OFF)
+
+if(MSVC AND VSR_ENABLE_RTX_SDK)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,7 +116,8 @@ endif()
 if(VSR_ENABLE_RTX_SDK)
   set(_vsr_rtx_dx11_source "${VSR_RTX_SDK_ROOT}/samples/RTX_Video_API/rtx_video_api_dx11_impl.cpp")
   set(_vsr_rtx_wrapper_source "${CMAKE_CURRENT_SOURCE_DIR}/src/video/rtx/rtx_dx11_processor.cpp")
-  set(_vsr_rtx_ngx_lib "${VSR_RTX_SDK_ROOT}/lib/Windows/x64/nvsdk_ngx_s.lib")
+  set(_vsr_rtx_ngx_release_lib "${VSR_RTX_SDK_ROOT}/lib/Windows/x64/nvsdk_ngx_s.lib")
+  set(_vsr_rtx_ngx_debug_lib "${VSR_RTX_SDK_ROOT}/lib/Windows/x64/nvsdk_ngx_s_dbg.lib")
   set(_vsr_rtx_vsr_dll "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_vsr.dll")
   set(_vsr_rtx_truehdr_dll "${VSR_RTX_SDK_ROOT}/bin/Windows/x64/rel/nvngx_truehdr.dll")
   if(NOT EXISTS "${_vsr_rtx_dx11_source}")
@@ -114,8 +126,11 @@ if(VSR_ENABLE_RTX_SDK)
   if(NOT EXISTS "${_vsr_rtx_wrapper_source}")
     message(FATAL_ERROR "RTX DX11 processor source not found: ${_vsr_rtx_wrapper_source}")
   endif()
-  if(NOT EXISTS "${_vsr_rtx_ngx_lib}")
-    message(FATAL_ERROR "RTX Video SDK NGX library not found: ${_vsr_rtx_ngx_lib}")
+  if(NOT EXISTS "${_vsr_rtx_ngx_release_lib}")
+    message(FATAL_ERROR "RTX Video SDK NGX release library not found: ${_vsr_rtx_ngx_release_lib}")
+  endif()
+  if(NOT EXISTS "${_vsr_rtx_ngx_debug_lib}")
+    message(FATAL_ERROR "RTX Video SDK NGX debug library not found: ${_vsr_rtx_ngx_debug_lib}")
   endif()
   if(NOT EXISTS "${_vsr_rtx_vsr_dll}")
     message(FATAL_ERROR "RTX Video VSR runtime DLL not found: ${_vsr_rtx_vsr_dll}")
@@ -134,7 +149,8 @@ if(VSR_ENABLE_RTX_SDK)
   target_link_libraries(rtx_video_api_dx11 PUBLIC
     d3d11
     dxgi
-    "${_vsr_rtx_ngx_lib}"
+    "$<$<CONFIG:Debug>:${_vsr_rtx_ngx_debug_lib}>"
+    "$<$<NOT:$<CONFIG:Debug>>:${_vsr_rtx_ngx_release_lib}>"
   )
   target_compile_definitions(rtx_video_api_dx11 PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 
@@ -146,6 +162,15 @@ endif()
 
 add_executable(vsr_backend src/app/main.cpp)
 target_link_libraries(vsr_backend PRIVATE vsr_backend_core)
+
+if(VSR_ENABLE_FFMPEG AND WIN32 AND FFMPEG_RUNTIME_DLLS)
+  add_custom_command(TARGET vsr_backend POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${FFMPEG_RUNTIME_DLLS}
+      "$<TARGET_FILE_DIR:vsr_backend>"
+    VERBATIM
+  )
+endif()
 
 if(VSR_ENABLE_RTX_SDK)
   add_custom_command(TARGET vsr_backend POST_BUILD

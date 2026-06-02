@@ -2,6 +2,12 @@
 #include "jobs/job_runner.h"
 #include "jobs/job_store.h"
 #include "video/fake_pipeline.h"
+#if defined(VSR_ENABLE_FFMPEG)
+#include "video/ffmpeg/ffmpeg_transcode_pipeline.h"
+#endif
+#if defined(VSR_ENABLE_FFMPEG) && defined(VSR_ENABLE_RTX_SDK)
+#include "video/rtx/rtx_dx11_processor.h"
+#endif
 
 #include <cstdlib>
 #include <iostream>
@@ -35,7 +41,16 @@ int main(int argc, char** argv) {
     }
 
     vsr::JobStore store;
+#if defined(VSR_ENABLE_FFMPEG)
+#if defined(VSR_ENABLE_RTX_SDK)
+    std::unique_ptr<vsr::RtxProcessor> rtx = std::make_unique<vsr::RtxDx11Processor>();
+#else
+    std::unique_ptr<vsr::RtxProcessor> rtx;
+#endif
+    vsr::JobRunner runner(store, std::make_unique<vsr::FfmpegTranscodePipeline>(std::move(rtx)));
+#else
     vsr::JobRunner runner(store, std::make_unique<vsr::FakePipeline>(vsr::FakePipelineMode::succeeds));
+#endif
     vsr::HttpServer server(store, runner);
 
     if (!server.listen("127.0.0.1", port)) {
