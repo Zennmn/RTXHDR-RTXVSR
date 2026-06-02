@@ -11,7 +11,7 @@
 namespace {
 
 int parse_port(int argc, char** argv) {
-    constexpr int default_port = 18080;
+    constexpr int default_port = 49321;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -26,7 +26,7 @@ int parse_port(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
-    int port = 18080;
+    int port = 49321;
     try {
         port = parse_port(argc, argv);
     } catch (const std::exception& ex) {

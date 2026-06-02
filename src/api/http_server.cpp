@@ -26,22 +26,11 @@ int status_for_cancel_error(const Error& error) {
 
 HttpServer::HttpServer(JobStore& store, JobRunner& runner) : store_(store), runner_(runner) {
     bind_routes();
+    worker_thread_ = std::thread([this] { worker_loop(); });
 }
 
 HttpServer::~HttpServer() {
     stop();
-
-    std::vector<std::thread> threads;
-    {
-        std::lock_guard lock(threads_mutex_);
-        threads.swap(job_threads_);
-    }
-
-    for (auto& thread : threads) {
-        if (thread.joinable()) {
-            thread.join();
-        }
-    }
 }
 
 bool HttpServer::listen(const std::string& host, int port) {
@@ -50,6 +39,30 @@ bool HttpServer::listen(const std::string& host, int port) {
 
 void HttpServer::stop() {
     server_.stop();
+
+    std::string current_job;
+    std::deque<std::string> queued_jobs;
+    {
+        std::lock_guard lock(worker_mutex_);
+        if (stopping_) {
+            current_job = current_job_;
+        } else {
+            stopping_ = true;
+            current_job = current_job_;
+            queued_jobs.swap(pending_jobs_);
+        }
+    }
+
+    if (!current_job.empty()) {
+        const auto canceled = runner_.request_cancel(current_job);
+        (void)canceled;
+    }
+    cancel_queued_jobs(std::move(queued_jobs));
+
+    worker_cv_.notify_all();
+    if (worker_thread_.joinable()) {
+        worker_thread_.join();
+    }
 }
 
 void HttpServer::bind_routes() {
@@ -72,15 +85,27 @@ void HttpServer::bind_routes() {
             return;
         }
 
-        const auto created = store_.create(parsed.value());
-        if (!created.ok()) {
-            response.status = 400;
-            set_json(response, error_to_json(created.error()));
-            return;
+        std::string id;
+        {
+            std::lock_guard lock(worker_mutex_);
+            if (stopping_) {
+                response.status = 503;
+                set_json(response, error_to_json({"server_stopping", "Server is stopping.", ""}));
+                return;
+            }
+
+            const auto created = store_.create(parsed.value());
+            if (!created.ok()) {
+                response.status = 400;
+                set_json(response, error_to_json(created.error()));
+                return;
+            }
+
+            id = created.value();
+            pending_jobs_.push_back(id);
         }
 
-        const auto id = created.value();
-        run_job_background(id);
+        worker_cv_.notify_one();
         response.status = 202;
         set_json(response, {{"id", id}});
     });
@@ -97,7 +122,7 @@ void HttpServer::bind_routes() {
     });
 
     server_.Post(R"(/api/jobs/([^/]+)/cancel)", [this](const httplib::Request& request, httplib::Response& response) {
-        const auto canceled = store_.request_cancel(request.matches[1].str());
+        const auto canceled = runner_.request_cancel(request.matches[1].str());
         if (!canceled.ok()) {
             response.status = status_for_cancel_error(canceled.error());
             set_json(response, error_to_json(canceled.error()));
@@ -108,12 +133,44 @@ void HttpServer::bind_routes() {
     });
 }
 
-void HttpServer::run_job_background(std::string id) {
-    std::lock_guard lock(threads_mutex_);
-    job_threads_.emplace_back([this, id = std::move(id)] {
+void HttpServer::worker_loop() {
+    for (;;) {
+        std::string id;
+        {
+            std::unique_lock lock(worker_mutex_);
+            worker_cv_.wait(lock, [this] {
+                return stopping_ || !pending_jobs_.empty();
+            });
+
+            if (stopping_) {
+                return;
+            }
+
+            id = std::move(pending_jobs_.front());
+            pending_jobs_.pop_front();
+            current_job_ = id;
+        }
+
         const auto result = runner_.run_one(id);
         (void)result;
-    });
+
+        {
+            std::lock_guard lock(worker_mutex_);
+            if (current_job_ == id) {
+                current_job_.clear();
+            }
+        }
+    }
+}
+
+void HttpServer::cancel_queued_jobs(std::deque<std::string> ids) {
+    for (const auto& id : ids) {
+        const auto canceled = runner_.request_cancel(id);
+        if (canceled.ok()) {
+            const auto marked = store_.start(id);
+            (void)marked;
+        }
+    }
 }
 
 } // namespace vsr

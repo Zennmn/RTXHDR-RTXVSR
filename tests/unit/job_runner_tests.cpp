@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <functional>
 #include <memory>
 #include <thread>
@@ -97,6 +98,29 @@ private:
 
     std::atomic<int>& active_;
     std::atomic<int>& max_active_;
+};
+
+class WaitForCancelPipeline final : public VideoPipeline {
+public:
+    std::future<void> started() { return started_.get_future(); }
+
+    Result<void> run(const TranscodeRequest&, CancellationToken& cancellation, ProgressCallback) override {
+        started_.set_value();
+        for (int i = 0; i < 1000; ++i) {
+            if (cancellation.requested.load()) {
+                observed_cancel.store(true);
+                return Result<void>::Fail({"job_canceled", "Job was canceled.", ""});
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        return Result<void>::Fail({"cancel_not_observed", "Cancel token was not set.", ""});
+    }
+
+    std::atomic_bool observed_cancel{false};
+
+private:
+    std::promise<void> started_;
 };
 
 } // namespace
@@ -223,6 +247,32 @@ TEST(JobRunner, cancellationRequestedBeforePipelineSuccessWinsFinalState) {
 
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error().code, "job_canceled");
+    EXPECT_EQ(store.get(id).value().state, JobState::canceled);
+}
+
+TEST(JobRunner, requestCancelSetsInFlightPipelineToken) {
+    JobStore store;
+    auto pipeline = std::make_unique<WaitForCancelPipeline>();
+    auto* wait_for_cancel = pipeline.get();
+    auto started = wait_for_cancel->started();
+    JobRunner runner(store, std::move(pipeline));
+    const auto id = store.create(valid_request()).value();
+    std::promise<Result<void>> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::thread worker([&]() {
+        result_promise.set_value(runner.run_one(id));
+    });
+
+    ASSERT_EQ(started.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+    const auto canceled = runner.request_cancel(id);
+    worker.join();
+    const auto result = result_future.get();
+
+    ASSERT_TRUE(canceled.ok()) << canceled.error().message;
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "job_canceled");
+    EXPECT_TRUE(wait_for_cancel->observed_cancel.load());
     EXPECT_EQ(store.get(id).value().state, JobState::canceled);
 }
 
