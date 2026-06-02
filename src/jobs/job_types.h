@@ -2,10 +2,14 @@
 
 #include "core/result.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace vsr {
@@ -96,6 +100,23 @@ struct CancellationToken {
     std::atomic_bool requested{false};
 };
 
+inline std::string normalized_path_key(std::string path) {
+    std::filesystem::path normalized(path);
+    std::error_code error;
+    const auto absolute = std::filesystem::absolute(normalized, error);
+    if (!error) {
+        normalized = absolute;
+    }
+    normalized = normalized.lexically_normal();
+
+    std::string key = normalized.string();
+    std::replace(key.begin(), key.end(), '/', '\\');
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return key;
+}
+
 inline const char* to_string(JobState state) {
     switch (state) {
     case JobState::queued: return "queued";
@@ -129,6 +150,13 @@ inline Result<void> validate_request(const TranscodeRequest& request) {
     if (request.output_path.empty()) {
         return Result<void>::Fail({"output_path_required", "Output path is required.", ""});
     }
+    if (normalized_path_key(request.input_path) == normalized_path_key(request.output_path)) {
+        return Result<void>::Fail({
+            "output_path_matches_input_path",
+            "Output path must be different from input path.",
+            request.output_path
+        });
+    }
     if (!request.processing.vsr.enabled && !request.processing.hdr.enabled) {
         return Result<void>::Fail({"processing_required", "Enable VSR, HDR, or both.", ""});
     }
@@ -137,6 +165,12 @@ inline Result<void> validate_request(const TranscodeRequest& request) {
     }
     if (request.output.video_codec != "h264" && request.output.video_codec != "hevc") {
         return Result<void>::Fail({"unsupported_video_codec", "Use h264 or hevc for MP4 output.", request.output.video_codec});
+    }
+    if (request.output.audio_mode != "copy" && request.output.audio_mode != "none") {
+        return Result<void>::Fail({"unsupported_audio_mode", "Use copy or none for audioMode.", request.output.audio_mode});
+    }
+    if (request.output.subtitle_mode != "copy-compatible" && request.output.subtitle_mode != "none") {
+        return Result<void>::Fail({"unsupported_subtitle_mode", "Use copy-compatible or none for subtitleMode.", request.output.subtitle_mode});
     }
     if (request.processing.vsr.enabled && (request.processing.vsr.quality < 1 || request.processing.vsr.quality > 4)) {
         return Result<void>::Fail({"invalid_vsr_quality", "VSR quality must be between 1 and 4.", std::to_string(request.processing.vsr.quality)});

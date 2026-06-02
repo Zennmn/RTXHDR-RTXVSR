@@ -37,6 +37,30 @@ TEST(JobRequestValidation, rejectsRequestWithoutProcessing) {
     EXPECT_EQ(result.error().code, "processing_required");
 }
 
+TEST(JobRequestValidation, rejectsSameInputAndOutputPath) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\in.mp4";
+    request.processing.vsr.enabled = true;
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "output_path_matches_input_path");
+}
+
+TEST(JobRequestValidation, rejectsCaseInsensitiveEquivalentInputAndOutputPath) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\Input.mp4";
+    request.output_path = "c:\\videos\\.\\INPUT.mp4";
+    request.processing.vsr.enabled = true;
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "output_path_matches_input_path");
+}
+
 TEST(JobRequestValidation, acceptsVsrHdrMp4Request) {
     TranscodeRequest request;
     request.input_path = "C:\\Videos\\in.mp4";
@@ -53,6 +77,47 @@ TEST(JobRequestValidation, acceptsVsrHdrMp4Request) {
     ASSERT_TRUE(result.ok()) << result.error().message;
 }
 
+TEST(JobRequestValidation, acceptsExplicitlyDroppingAudioAndSubtitles) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.vsr.enabled = true;
+    request.output.audio_mode = "none";
+    request.output.subtitle_mode = "none";
+
+    const auto result = validate_request(request);
+
+    ASSERT_TRUE(result.ok()) << result.error().message;
+}
+
+TEST(JobRequestValidation, rejectsUnsupportedAudioMode) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.vsr.enabled = true;
+    request.output.audio_mode = "transcode";
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "unsupported_audio_mode");
+    EXPECT_EQ(result.error().details, "transcode");
+}
+
+TEST(JobRequestValidation, rejectsUnsupportedSubtitleMode) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.vsr.enabled = true;
+    request.output.subtitle_mode = "copy-all";
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "unsupported_subtitle_mode");
+    EXPECT_EQ(result.error().details, "copy-all");
+}
+
 TEST(JobDomainTypes, jobRecordPreservesFullRequestWhileSnapshotRemainsPathFocused) {
     TranscodeRequest request;
     request.input_path = "C:\\Videos\\source.mp4";
@@ -64,7 +129,7 @@ TEST(JobDomainTypes, jobRecordPreservesFullRequestWhileSnapshotRemainsPathFocuse
     request.processing.hdr.max_luminance = 1200;
     request.output.container = "mp4";
     request.output.video_codec = "hevc";
-    request.output.audio_mode = "transcode";
+    request.output.audio_mode = "none";
 
     JobRecord record;
     record.request = request;
@@ -78,7 +143,7 @@ TEST(JobDomainTypes, jobRecordPreservesFullRequestWhileSnapshotRemainsPathFocuse
     EXPECT_TRUE(record.request.processing.hdr.enabled);
     EXPECT_EQ(record.request.processing.hdr.max_luminance, 1200);
     EXPECT_EQ(record.request.output.video_codec, "hevc");
-    EXPECT_EQ(record.request.output.audio_mode, "transcode");
+    EXPECT_EQ(record.request.output.audio_mode, "none");
 
     EXPECT_EQ(record.snapshot.state, JobState::queued);
     EXPECT_EQ(record.snapshot.input_path, request.input_path);

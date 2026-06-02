@@ -39,7 +39,7 @@ TEST(JobStore, preservesFullOriginalRequestForRunner) {
     request.processing.hdr.enabled = true;
     request.processing.hdr.max_luminance = 1400;
     request.output.video_codec = "hevc";
-    request.output.audio_mode = "transcode";
+    request.output.audio_mode = "none";
     request.output.subtitle_mode = "none";
     const auto id = store.create(request).value();
 
@@ -53,7 +53,7 @@ TEST(JobStore, preservesFullOriginalRequestForRunner) {
     EXPECT_TRUE(stored.value().processing.hdr.enabled);
     EXPECT_EQ(stored.value().processing.hdr.max_luminance, 1400);
     EXPECT_EQ(stored.value().output.video_codec, "hevc");
-    EXPECT_EQ(stored.value().output.audio_mode, "transcode");
+    EXPECT_EQ(stored.value().output.audio_mode, "none");
     EXPECT_EQ(stored.value().output.subtitle_mode, "none");
 }
 

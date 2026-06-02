@@ -149,6 +149,8 @@ Error responses always use:
 - HDR max luminance: integer nits, default 1000.
 - HDR output codec: `hevc`.
 - VSR-only default codec: `h264`.
+- Audio mode: `copy` or `none`, default `copy`.
+- Subtitle mode: `copy-compatible` or `none`, default `copy-compatible`.
 
 ## Recommended UI States
 

@@ -172,7 +172,7 @@ TEST(JobRunner, passesOriginalProcessingAndOutputSettingsToPipeline) {
     request.processing.hdr.middle_gray = 50;
     request.processing.hdr.max_luminance = 1500;
     request.output.video_codec = "hevc";
-    request.output.audio_mode = "transcode";
+    request.output.audio_mode = "none";
     request.output.subtitle_mode = "none";
     const auto id = store.create(request).value();
 
@@ -190,7 +190,7 @@ TEST(JobRunner, passesOriginalProcessingAndOutputSettingsToPipeline) {
     EXPECT_EQ(spy->observed_request.processing.hdr.middle_gray, 50);
     EXPECT_EQ(spy->observed_request.processing.hdr.max_luminance, 1500);
     EXPECT_EQ(spy->observed_request.output.video_codec, "hevc");
-    EXPECT_EQ(spy->observed_request.output.audio_mode, "transcode");
+    EXPECT_EQ(spy->observed_request.output.audio_mode, "none");
     EXPECT_EQ(spy->observed_request.output.subtitle_mode, "none");
 }
 
