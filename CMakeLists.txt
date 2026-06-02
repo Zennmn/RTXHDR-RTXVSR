@@ -193,6 +193,7 @@ if(VSR_ENABLE_TESTS)
     tests/unit/job_runner_tests.cpp
     tests/unit/json_dto_tests.cpp
     tests/unit/capabilities_tests.cpp
+    tests/unit/ffmpeg_transcode_pipeline_tests.cpp
   )
   set(_vsr_existing_test_sources "")
   foreach(_source IN LISTS _vsr_test_sources)

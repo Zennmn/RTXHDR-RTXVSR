@@ -2,6 +2,12 @@
 
 #include <filesystem>
 
+#if defined(VSR_ENABLE_FFMPEG)
+extern "C" {
+#include <libavcodec/avcodec.h>
+}
+#endif
+
 #ifdef _WIN32
 #include <d3d11.h>
 #include <windows.h>
@@ -93,6 +99,15 @@ bool detect_d3d11_available() {
 #endif
 }
 
+bool ffmpeg_encoder_available(const char* name) {
+#if defined(VSR_ENABLE_FFMPEG)
+    return avcodec_find_encoder_by_name(name) != nullptr;
+#else
+    (void)name;
+    return false;
+#endif
+}
+
 } // namespace
 
 nlohmann::json capability_snapshot_to_json(const CapabilitySnapshot& snapshot) {
@@ -131,10 +146,20 @@ CapabilitySnapshot detect_capabilities() {
     snapshot.vsr_available = snapshot.d3d11_available && vsr_dll_found;
     snapshot.truehdr_available = snapshot.d3d11_available && truehdr_dll_found;
 
-    snapshot.nvenc_h264_available = snapshot.d3d11_available;
-    snapshot.nvenc_hevc_main10_available = snapshot.d3d11_available;
-    snapshot.messages.push_back(
-        "NVENC capability flags currently mirror D3D11 availability; true encoder probing will be added later.");
+    const bool h264_nvenc_found = ffmpeg_encoder_available("h264_nvenc");
+    const bool hevc_nvenc_found = ffmpeg_encoder_available("hevc_nvenc");
+    snapshot.nvenc_h264_available = snapshot.d3d11_available && h264_nvenc_found;
+    snapshot.nvenc_hevc_main10_available = snapshot.d3d11_available && hevc_nvenc_found;
+#if !defined(VSR_ENABLE_FFMPEG)
+    snapshot.messages.push_back("FFmpeg support is not enabled in this backend build.");
+#else
+    if (!h264_nvenc_found) {
+        snapshot.messages.push_back("FFmpeg h264_nvenc encoder was not found.");
+    }
+    if (!hevc_nvenc_found) {
+        snapshot.messages.push_back("FFmpeg hevc_nvenc encoder was not found.");
+    }
+#endif
 
     return snapshot;
 }
