@@ -1625,10 +1625,10 @@ Result<void> RtxDx11Processor::initialize(ID3D11Device* device, const Processing
 
     const API_BOOL created = rtx_video_api_dx11_create(
         device,
-        settings.hdr.enabled ? API_BOOL_TRUE : API_BOOL_FALSE,
-        settings.vsr.enabled ? API_BOOL_TRUE : API_BOOL_FALSE);
+        settings.hdr.enabled ? API_BOOL_SUCCESS : API_BOOL_FAIL,
+        settings.vsr.enabled ? API_BOOL_SUCCESS : API_BOOL_FAIL);
 
-    if (created != API_BOOL_TRUE) {
+    if (created != API_BOOL_SUCCESS) {
         return Result<void>::Fail({"rtx_initialize_failed", "RTX Video SDK feature creation failed.", ""});
     }
 
@@ -1657,7 +1657,7 @@ Result<void> RtxDx11Processor::process(const RtxDx11Frame& frame, const Processi
         settings.vsr.enabled ? &vsr : nullptr,
         settings.hdr.enabled ? &hdr : nullptr);
 
-    if (result != API_BOOL_TRUE) {
+    if (result != API_BOOL_SUCCESS) {
         return Result<void>::Fail({"rtx_evaluate_failed", "RTX Video SDK evaluation failed.", ""});
     }
 
