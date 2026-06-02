@@ -98,6 +98,10 @@ if(VSR_ENABLE_FFMPEG)
 endif()
 
 set(VSR_RTX_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/RTX_Video_SDK_v1.1.0" CACHE PATH "NVIDIA RTX Video SDK root")
+if(VSR_ENABLE_RTX_SDK AND NOT WIN32)
+  message(FATAL_ERROR "VSR_ENABLE_RTX_SDK requires Windows")
+endif()
+
 if(VSR_ENABLE_RTX_SDK)
   set(_vsr_rtx_dx11_source "${VSR_RTX_SDK_ROOT}/samples/RTX_Video_API/rtx_video_api_dx11_impl.cpp")
   set(_vsr_rtx_ngx_lib "${VSR_RTX_SDK_ROOT}/lib/Windows/x64/nvsdk_ngx_s.lib")

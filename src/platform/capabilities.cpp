@@ -42,33 +42,49 @@ std::filesystem::path process_directory() {
 
 bool detect_d3d11_available() {
 #ifdef _WIN32
-    ID3D11Device* device = nullptr;
-    ID3D11DeviceContext* context = nullptr;
-    D3D_FEATURE_LEVEL feature_level = {};
-    const D3D_FEATURE_LEVEL feature_levels[] = {
+    const auto try_create_device = [](const D3D_FEATURE_LEVEL* feature_levels, UINT feature_level_count) {
+        ID3D11Device* device = nullptr;
+        ID3D11DeviceContext* context = nullptr;
+        D3D_FEATURE_LEVEL feature_level = {};
+
+        const HRESULT result = D3D11CreateDevice(
+            nullptr,
+            D3D_DRIVER_TYPE_HARDWARE,
+            nullptr,
+            0,
+            feature_levels,
+            feature_level_count,
+            D3D11_SDK_VERSION,
+            &device,
+            &feature_level,
+            &context);
+
+        if (context != nullptr) {
+            context->Release();
+        }
+        if (device != nullptr) {
+            device->Release();
+        }
+
+        return result;
+    };
+
+    const D3D_FEATURE_LEVEL feature_levels_with_11_1[] = {
         D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1,
         D3D_FEATURE_LEVEL_10_0,
     };
+    const D3D_FEATURE_LEVEL feature_levels[] = {
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+    };
 
-    const HRESULT result = D3D11CreateDevice(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
-        nullptr,
-        0,
-        feature_levels,
-        static_cast<UINT>(std::size(feature_levels)),
-        D3D11_SDK_VERSION,
-        &device,
-        &feature_level,
-        &context);
-
-    if (context != nullptr) {
-        context->Release();
-    }
-    if (device != nullptr) {
-        device->Release();
+    HRESULT result =
+        try_create_device(feature_levels_with_11_1, static_cast<UINT>(std::size(feature_levels_with_11_1)));
+    if (result == E_INVALIDARG) {
+        result = try_create_device(feature_levels, static_cast<UINT>(std::size(feature_levels)));
     }
 
     return SUCCEEDED(result);
