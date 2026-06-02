@@ -1,6 +1,7 @@
 #include "api/http_server.h"
 #include "jobs/job_runner.h"
 #include "jobs/job_store.h"
+#include "platform/logging.h"
 #include "video/fake_pipeline.h"
 #if defined(VSR_ENABLE_FFMPEG)
 #include "video/ffmpeg/ffmpeg_transcode_pipeline.h"
@@ -10,9 +11,11 @@
 #endif
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -29,6 +32,22 @@ int parse_port(int argc, char** argv) {
     return default_port;
 }
 
+std::filesystem::path default_log_directory() {
+#if defined(_WIN32)
+    if (const char* local_app_data = std::getenv("LOCALAPPDATA"); local_app_data != nullptr && *local_app_data != '\0') {
+        return std::filesystem::path(local_app_data) / "VSR" / "logs";
+    }
+#endif
+
+    std::error_code ec;
+    const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
+    if (!ec && !temp.empty()) {
+        return temp / "VSR" / "logs";
+    }
+
+    return "logs";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -39,6 +58,10 @@ int main(int argc, char** argv) {
         std::cerr << "Invalid --port: " << ex.what() << "\n";
         return EXIT_FAILURE;
     }
+
+    vsr::initialize_logging(default_log_directory());
+    vsr::log_info("Starting vsr_backend on 127.0.0.1:" + std::to_string(port));
+    vsr::log_info("Log file: " + vsr::current_log_path().string());
 
     vsr::JobStore store;
 #if defined(VSR_ENABLE_FFMPEG)
@@ -54,6 +77,7 @@ int main(int argc, char** argv) {
     vsr::HttpServer server(store, runner);
 
     if (!server.listen("127.0.0.1", port)) {
+        vsr::log_error("Failed to listen on 127.0.0.1:" + std::to_string(port));
         std::cerr << "Failed to listen on 127.0.0.1:" << port << "\n";
         return EXIT_FAILURE;
     }

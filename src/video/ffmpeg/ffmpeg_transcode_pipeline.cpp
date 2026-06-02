@@ -1,5 +1,7 @@
 #include "video/ffmpeg/ffmpeg_transcode_pipeline.h"
 
+#include "platform/logging.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -593,6 +595,7 @@ Result<void> FfmpegTranscodePipeline::run(
     const TranscodeRequest& request,
     CancellationToken& cancellation,
     ProgressCallback progress) {
+    log_info("FFmpeg pipeline starting: " + request.input_path + " -> " + request.output_path);
     std::error_code input_status_error;
     const bool input_exists = std::filesystem::exists(request.input_path, input_status_error);
     if (input_status_error) {
@@ -612,8 +615,12 @@ Result<void> FfmpegTranscodePipeline::run(
             "Build with VSR_ENABLE_RTX_SDK=ON to enable RTX processing."
         });
     }
-    if (cancellation.requested.load()) {
+    auto canceled_result = [](const std::string& detail) -> Result<void> {
+        log_info("FFmpeg pipeline canceled: " + detail + ".");
         return Result<void>::Fail({"job_canceled", "Job was canceled.", ""});
+    };
+    if (cancellation.requested.load()) {
+        return canceled_result("before initialization");
     }
 
     if (progress) {
@@ -920,7 +927,7 @@ Result<void> FfmpegTranscodePipeline::run(
 
     auto process_decoded_frame = [&](AVFrame* frame) -> Result<void> {
         if (cancellation.requested.load()) {
-            return Result<void>::Fail({"job_canceled", "Job was canceled.", ""});
+            return canceled_result("before processing decoded frame");
         }
         if (frame->format != AV_PIX_FMT_D3D11 || frame->data[0] == nullptr) {
             return Result<void>::Fail({
@@ -1057,6 +1064,9 @@ Result<void> FfmpegTranscodePipeline::run(
     };
 
     for (;;) {
+        if (cancellation.requested.load()) {
+            return canceled_result("while reading input");
+        }
         av_packet_unref(packet.get());
         result = av_read_frame(input.get(), packet.get());
         if (result == AVERROR_EOF) {
@@ -1102,6 +1112,9 @@ Result<void> FfmpegTranscodePipeline::run(
         }
     }
 
+    if (cancellation.requested.load()) {
+        return canceled_result("before decoder flush");
+    }
     result = avcodec_send_packet(decoder_context.get(), nullptr);
     if (result < 0) {
         return Result<void>::Fail(ffmpeg_error(
@@ -1114,6 +1127,9 @@ Result<void> FfmpegTranscodePipeline::run(
         return Result<void>::Fail(decoded_flush.error());
     }
 
+    if (cancellation.requested.load()) {
+        return canceled_result("before encoder flush");
+    }
     result = avcodec_send_frame(encoder_context.get(), nullptr);
     if (result < 0) {
         return Result<void>::Fail(ffmpeg_error(
@@ -1135,6 +1151,9 @@ Result<void> FfmpegTranscodePipeline::run(
         progress(muxing);
     }
 
+    if (cancellation.requested.load()) {
+        return canceled_result("before final muxing");
+    }
     result = av_write_trailer(output.get());
     if (result < 0) {
         return Result<void>::Fail(ffmpeg_error(
@@ -1144,6 +1163,7 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     rtx_shutdown.release();
+    log_info("FFmpeg pipeline completed: " + request.output_path);
     if (progress) {
         JobProgress finalizing;
         finalizing.stage = JobStage::finalizing;
