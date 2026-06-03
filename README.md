@@ -32,6 +32,12 @@
 - 应用采用 `C++ 后端 + React/Tauri 前端` 的本地桌面架构
 - 后端仅监听 `127.0.0.1`
 
+## 许可证
+
+- 仓库自有代码采用 [MIT License](./LICENSE)
+- `NVIDIA RTX Video SDK`、FFmpeg 及其他第三方组件仍然使用各自许可证
+- 具体边界见 [THIRD_PARTY.md](./THIRD_PARTY.md)
+
 ## 从源码构建
 
 如果你想自己开发、调试或修改项目，可以从源码构建。
