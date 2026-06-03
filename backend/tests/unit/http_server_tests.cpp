@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -13,14 +14,92 @@
 #include <memory>
 #include <thread>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 using namespace vsr;
 
 namespace {
 
+#if defined(_WIN32)
+class WsaSession {
+public:
+    WsaSession() {
+        WSADATA data{};
+        initialized_ = WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }
+
+    ~WsaSession() {
+        if (initialized_) {
+            WSACleanup();
+        }
+    }
+
+    bool initialized() const { return initialized_; }
+
+private:
+    bool initialized_ = false;
+};
+#endif
+
+int reserve_unused_local_port() {
+#if defined(_WIN32)
+    WsaSession session;
+    if (!session.initialized()) {
+        return 0;
+    }
+#endif
+
+    const auto socket_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_fd < 0) {
+        return 0;
+    }
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+
+    if (::bind(socket_fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+#if defined(_WIN32)
+        closesocket(socket_fd);
+#else
+        close(socket_fd);
+#endif
+        return 0;
+    }
+
+    socklen_t size = sizeof(address);
+    if (::getsockname(socket_fd, reinterpret_cast<sockaddr*>(&address), &size) != 0) {
+#if defined(_WIN32)
+        closesocket(socket_fd);
+#else
+        close(socket_fd);
+#endif
+        return 0;
+    }
+
+    const auto port = static_cast<int>(ntohs(address.sin_port));
+#if defined(_WIN32)
+    closesocket(socket_fd);
+#else
+    close(socket_fd);
+#endif
+    return port;
+}
+
 class TestHttpServer {
 public:
     TestHttpServer()
-        : port_(next_port_.fetch_add(1)),
+        : port_(reserve_unused_local_port()),
           runner_(store_, std::make_unique<FakePipeline>(FakePipelineMode::succeeds)),
           server_(store_, runner_) {}
 
@@ -33,7 +112,11 @@ public:
 
     int port() const { return port_; }
 
-    void start() {
+    bool start() {
+        if (port_ == 0) {
+            return false;
+        }
+
         thread_ = std::thread([this] {
             server_.listen("127.0.0.1", port_);
         });
@@ -41,15 +124,14 @@ public:
         httplib::Client client("127.0.0.1", port_);
         for (int i = 0; i < 40; ++i) {
             if (const auto response = client.Get("/api/health"); response && response->status == 200) {
-                return;
+                return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        FAIL() << "test server did not become ready";
+        return false;
     }
 
 private:
-    static std::atomic_int next_port_;
     int port_;
     JobStore store_;
     JobRunner runner_;
@@ -57,16 +139,18 @@ private:
     std::thread thread_;
 };
 
-std::atomic_int TestHttpServer::next_port_{49322};
-
 } // namespace
 
 TEST(HttpServer, respondsToCorsPreflight) {
     TestHttpServer server;
-    server.start();
+    ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
+    httplib::Headers headers{
+        {"Origin", "http://127.0.0.1:3000"},
+        {"Access-Control-Request-Method", "POST"},
+    };
 
-    const auto response = client.Options("/api/jobs");
+    const auto response = client.Options("/api/jobs", headers);
 
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 204);
@@ -77,7 +161,7 @@ TEST(HttpServer, respondsToCorsPreflight) {
 
 TEST(HttpServer, rejectsInvalidProbeJson) {
     TestHttpServer server;
-    server.start();
+    ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
 
     const auto response = client.Post("/api/media/probe", "{", "application/json");
@@ -95,9 +179,9 @@ TEST(HttpServer, probesExistingFileWithFallbackMetadata) {
     }
 
     TestHttpServer server;
-    server.start();
+    ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
-    const std::string body = std::string("{\"inputPath\":\"") + path.string() + "\"}";
+    const std::string body = nlohmann::json{{"inputPath", path.string()}}.dump();
 
     const auto response = client.Post("/api/media/probe", body, "application/json");
 
