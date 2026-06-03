@@ -15,6 +15,8 @@ struct MediaProbe {
     int height = 0;
     std::int64_t frame_count = 0;
     double duration_seconds = 0.0;
+    std::string codec_name;
+    int bit_depth = 0;
     std::vector<std::string> warnings;
 };
 

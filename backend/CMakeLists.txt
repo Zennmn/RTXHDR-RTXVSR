@@ -69,6 +69,7 @@ set(_vsr_core_sources
   src/jobs/job_store.cpp
   src/jobs/job_runner.cpp
   src/video/fake_pipeline.cpp
+  src/video/media_probe_service.cpp
   src/api/json_dto.cpp
   src/api/http_server.cpp
   src/platform/capabilities.cpp

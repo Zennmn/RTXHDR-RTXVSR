@@ -1,7 +1,9 @@
 #include "video/ffmpeg/ffmpeg_probe.h"
 
 extern "C" {
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/pixdesc.h>
 }
 
 #include <memory>
@@ -53,6 +55,13 @@ Result<MediaProbe> probe_media(const std::string& path) {
     probe.width = stream->codecpar->width;
     probe.height = stream->codecpar->height;
     probe.frame_count = stream->nb_frames;
+    probe.codec_name = avcodec_get_name(stream->codecpar->codec_id);
+
+    const AVPixFmtDescriptor* descriptor =
+        av_pix_fmt_desc_get(static_cast<AVPixelFormat>(stream->codecpar->format));
+    if (descriptor != nullptr && descriptor->nb_components > 0) {
+        probe.bit_depth = descriptor->comp[0].depth;
+    }
 
     return Result<MediaProbe>::Ok(std::move(probe));
 }
