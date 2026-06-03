@@ -1,29 +1,24 @@
-# RTX Video Backend
+# RTXHDR-RTXVSR
 
-Windows-only local backend for complete-video RTX VSR and RTX Video HDR transcoding.
+Windows-only RTX video conversion app project.
 
-## Build Unit-Test Backend
+## Project Layout
 
-```powershell
-cmake -S . -B build -DVSR_ENABLE_TESTS=ON -DVSR_ENABLE_FFMPEG=OFF -DVSR_ENABLE_RTX_SDK=OFF
-cmake --build build --target vsr_backend_tests vsr_backend
-ctest --test-dir build --output-on-failure
-```
+- `backend/`: native C++ local sidecar backend for RTX VSR, RTX Video HDR, FFmpeg, and NVENC.
+- `frontend/`: Windows UI workspace. The current React/Vite UI lives in `frontend/rtx-video-converter/`.
+- `FRONTEND_INTEGRATION.md`: API contract for connecting the UI to the backend.
+- `PROJECT_CONTEXT.md`: current project status and repository overview.
 
-## Build Hardware Backend
+## Backend Quick Start
 
-Install a Windows FFmpeg developer package with D3D11VA and NVENC support, then set `FFMPEG_ROOT`.
-Download/unpack NVIDIA RTX Video SDK 1.1.0 to `RTX_Video_SDK_v1.1.0`, or pass `-DVSR_RTX_SDK_ROOT=C:\path\to\RTX_Video_SDK_v1.1.0`.
+From the repository root:
 
 ```powershell
-cmake -S . -B build-hw -DVSR_ENABLE_TESTS=OFF -DVSR_ENABLE_FFMPEG=ON -DVSR_ENABLE_RTX_SDK=ON -DFFMPEG_ROOT=C:\ffmpeg
-cmake --build build-hw --target vsr_backend --config Release
+cmake -S backend -B build\backend -DVSR_ENABLE_TESTS=ON -DVSR_ENABLE_FFMPEG=OFF -DVSR_ENABLE_RTX_SDK=OFF
+cmake --build build\backend --target vsr_backend_tests vsr_backend
+ctest --test-dir build\backend --output-on-failure
 ```
 
-## Run
+The root CMake file also delegates to `backend/`, so `cmake -S . -B build` remains available for workspace-level builds.
 
-```powershell
-.\build-hw\Release\vsr_backend.exe --port 49321
-```
-
-Open `docs/frontend-integration.md` for API details.
+For project status, read `PROJECT_CONTEXT.md`. For frontend/backend API details, read `FRONTEND_INTEGRATION.md`.

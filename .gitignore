@@ -1,8 +1,13 @@
 .codegraph/
-build/
+build*/
+**/build*/
 out/
 dist/
 logs/
+artifacts/
+node_modules/
+.vite/
+.vs/
 *.log
 *.ilk
 *.pdb
@@ -17,4 +22,5 @@ logs/
 *.webm
 *.y4m
 *.yuv
+RTX_Video_SDK_v1.1.0/
 RTX_Video_SDK_v1.1.0.zip
