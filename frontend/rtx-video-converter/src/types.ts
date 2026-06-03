@@ -1,4 +1,26 @@
-export type ProcessingMode = 'vsr' | 'hdr' | 'both';
+import type { MediaProbeResponse, ProcessingMode, UiCodec } from './api/types';
+
+export type { MediaProbeResponse, ProcessingMode, UiCodec };
+
+export interface ConversionSettings {
+  mode: ProcessingMode;
+  vsrScale: number;
+  vsrQuality: number;
+  hdrContrast: number;
+  hdrSaturation: number;
+  hdrMiddleGray: number;
+  hdrMaxLuminance: number;
+  codec: UiCodec;
+  keepAudio: boolean;
+  keepSubtitles: boolean;
+}
+
+export interface SelectedInput {
+  path: string;
+  metadata: MediaProbeResponse | null;
+}
+
+// Temporary compatibility exports for the existing UI until Task 8 rewires App.tsx.
 export type Codec = 'H.264' | 'HEVC Main10';
 
 export interface FileInfo {
@@ -7,15 +29,4 @@ export interface FileInfo {
   resolution: string;
   duration: string;
   codec: string;
-}
-
-export interface Task {
-  id: string;
-  filename: string;
-  mode: ProcessingMode;
-  status: 'Pending' | 'Processing' | 'Completed' | 'Failed' | 'Cancelled';
-  progress: number;
-  stage: string;
-  fps: number;
-  eta: string;
 }
