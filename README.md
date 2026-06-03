@@ -10,8 +10,6 @@
 - 便携版：[RTX.Video.Converter_0.1.0_x64-portable.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v0.1.0/RTX.Video.Converter_0.1.0_x64-portable.zip)
 - 所有版本：[Releases](https://github.com/Zennmn/RTXHDR-RTXVSR/releases)
 
-如果你只是想使用软件，优先从 `Releases` 下载，不需要自己编译源码。
-
 ## 功能
 
 - RTX VSR 视频超分
@@ -36,7 +34,7 @@
 
 ## 从源码构建
 
-只有在你想自己开发、调试或修改项目时，才需要从源码构建。
+如果你想自己开发、调试或修改项目，可以从源码构建。
 
 基础环境：
 
