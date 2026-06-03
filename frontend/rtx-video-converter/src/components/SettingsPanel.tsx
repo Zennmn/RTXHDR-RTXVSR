@@ -1,21 +1,26 @@
 import type { CapabilityResponse, ProcessingMode, UiCodec } from '../api/types';
+import { formatResolution, parseResolution, scaleResolution } from '../lib/resolution';
 import type { ConversionSettings } from '../types';
 import { WinSegmentedControl, WinSlider, WinSwitch } from './WinUI';
 
 export function SettingsPanel({
   settings,
   capabilities,
+  inputResolution,
   disabled,
   onChange,
 }: {
   settings: ConversionSettings;
   capabilities: CapabilityResponse | null;
+  inputResolution: string | null;
   disabled: boolean;
   onChange: (settings: ConversionSettings) => void;
 }) {
   const hdrDisabled = disabled || capabilities?.truehdrAvailable === false;
   const vsrDisabled = disabled || capabilities?.vsrAvailable === false;
   const codecDisabled = disabled || settings.mode !== 'vsr';
+  const parsedResolution = parseResolution(inputResolution);
+  const scaledResolution = parsedResolution ? formatResolution(scaleResolution(parsedResolution, settings.vsrScale)) : null;
   const update = (patch: Partial<ConversionSettings>) => onChange({ ...settings, ...patch });
 
   return (
@@ -44,9 +49,9 @@ export function SettingsPanel({
                 value={settings.vsrScale}
                 min={1}
                 max={4}
-                step={1}
+                step={0.1}
                 onChange={(vsrScale) => update({ vsrScale })}
-                formatValue={(value) => `${value}.0x`}
+                formatValue={(value) => `${value.toFixed(1)}x${scaledResolution ? ` -> ${scaledResolution}` : ''}`}
               />
 
               <div>

@@ -118,7 +118,13 @@ export default function App() {
             <CapabilityBanner capabilities={backend.capabilities} message={loadingInput ? '正在探测媒体信息...' : backend.message} />
             <ErrorDetails error={job.error} />
           </div>
-          <SettingsPanel settings={settings} capabilities={backend.capabilities} disabled={job.activeJob !== null} onChange={setSettings} />
+          <SettingsPanel
+            settings={settings}
+            capabilities={backend.capabilities}
+            inputResolution={selectedInput.metadata?.resolution ?? null}
+            disabled={job.activeJob !== null}
+            onChange={setSettings}
+          />
         </section>
       </main>
 
