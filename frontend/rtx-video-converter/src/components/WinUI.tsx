@@ -30,7 +30,7 @@ export function WinSlider({
 export function WinSegmentedControl({ 
   options, value, onChange 
 }: { 
-  options: {label: string, value: string}[], 
+  options: {label: string, value: string, disabled?: boolean}[], 
   value: string, 
   onChange: (val: string) => void 
 }) {
@@ -40,10 +40,13 @@ export function WinSegmentedControl({
         <button
           key={opt.value}
           onClick={() => onChange(opt.value)}
+          disabled={opt.disabled}
           className={`flex-1 sm:flex-none px-8 py-1.5 text-xs rounded transition-all duration-200 font-medium ${
             value === opt.value 
               ? 'bg-white shadow-sm text-[#1a1a1a]' 
-              : 'text-[#5a5a5a] hover:bg-black/5 hover:text-[#1a1a1a]'
+              : opt.disabled
+                ? 'cursor-not-allowed opacity-40 text-[#5a5a5a]'
+                : 'text-[#5a5a5a] hover:bg-black/5 hover:text-[#1a1a1a]'
           }`}
         >
           {opt.label}
