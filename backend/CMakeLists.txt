@@ -195,6 +195,8 @@ if(VSR_ENABLE_TESTS)
     tests/unit/capabilities_tests.cpp
     tests/unit/logging_tests.cpp
     tests/unit/ffmpeg_transcode_pipeline_tests.cpp
+    tests/unit/media_probe_tests.cpp
+    tests/unit/http_server_tests.cpp
   )
   set(_vsr_existing_test_sources "")
   foreach(_source IN LISTS _vsr_test_sources)
