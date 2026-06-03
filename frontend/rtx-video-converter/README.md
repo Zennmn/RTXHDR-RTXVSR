@@ -34,3 +34,23 @@ npm run tauri:dev
 ```
 
 Tauri requires Rust and Cargo in `PATH`.
+
+## Windows Packaging
+
+Build the installer:
+
+```powershell
+npm run tauri:build
+```
+
+Build the installer and a no-install portable package:
+
+```powershell
+npm run tauri:build:portable
+```
+
+The portable output is written to:
+
+```text
+src-tauri/target/release/bundle/portable/
+```

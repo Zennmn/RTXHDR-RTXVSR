@@ -11,9 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "sidecar:prepare": "powershell -ExecutionPolicy Bypass -File scripts/prepare-tauri-sidecar.ps1",
+    "portable:package": "powershell -ExecutionPolicy Bypass -File scripts/package-portable.ps1",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:portable": "npm run tauri:build && npm run portable:package"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
