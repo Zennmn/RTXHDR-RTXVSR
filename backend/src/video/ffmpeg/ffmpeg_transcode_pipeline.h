@@ -3,6 +3,8 @@
 #include "video/rtx/rtx_processor.h"
 #include "video/video_pipeline.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 
@@ -25,6 +27,34 @@ inline const char* ffmpeg_nvenc_encoder_name(const OutputSettings& output, bool 
 
 inline bool ffmpeg_requests_stream_copy(const OutputSettings& output) {
     return output.audio_mode == "copy" || output.subtitle_mode == "copy-compatible";
+}
+
+inline std::int64_t ffmpeg_recommended_nvenc_bitrate(
+    std::int64_t source_bit_rate,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height,
+    double frames_per_second,
+    bool hdr_enabled) {
+    constexpr double minimum_bit_rate = 2'500'000.0;
+    constexpr double maximum_bit_rate = 160'000'000.0;
+
+    const double output_pixels = static_cast<double>(std::max(output_width, 0)) * static_cast<double>(std::max(output_height, 0));
+    if (output_pixels <= 0.0) {
+        return static_cast<std::int64_t>(minimum_bit_rate);
+    }
+
+    const double input_pixels = static_cast<double>(std::max(input_width, 0)) * static_cast<double>(std::max(input_height, 0));
+    const double source_based = source_bit_rate > 0 && input_pixels > 0.0
+        ? static_cast<double>(source_bit_rate) * (output_pixels / input_pixels) * (hdr_enabled ? 1.25 : 1.0)
+        : 0.0;
+
+    const double safe_fps = frames_per_second > 1.0 ? frames_per_second : 30.0;
+    const double bits_per_pixel_frame = hdr_enabled ? 0.12 : 0.10;
+    const double pixel_based = output_pixels * safe_fps * bits_per_pixel_frame;
+
+    return static_cast<std::int64_t>(std::llround(std::clamp(std::max(source_based, pixel_based), minimum_bit_rate, maximum_bit_rate)));
 }
 
 class FfmpegTranscodePipeline final : public VideoPipeline {

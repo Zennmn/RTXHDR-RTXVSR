@@ -35,3 +35,29 @@ TEST(FfmpegTranscodePipelineOptions, detectsDefaultCopyModes) {
     output.subtitle_mode = "none";
     EXPECT_FALSE(vsr::ffmpeg_requests_stream_copy(output));
 }
+
+TEST(FfmpegTranscodePipelineOptions, scalesNvencBitrateWithOutputPixels) {
+    const auto target = vsr::ffmpeg_recommended_nvenc_bitrate(
+        13'940'950,
+        2560,
+        1380,
+        5120,
+        2760,
+        30.0,
+        true);
+
+    EXPECT_GE(target, 65'000'000);
+}
+
+TEST(FfmpegTranscodePipelineOptions, usesPixelFloorWhenSourceBitrateIsMissing) {
+    const auto target = vsr::ffmpeg_recommended_nvenc_bitrate(
+        0,
+        640,
+        360,
+        1280,
+        720,
+        30.0,
+        false);
+
+    EXPECT_GE(target, 2'700'000);
+}

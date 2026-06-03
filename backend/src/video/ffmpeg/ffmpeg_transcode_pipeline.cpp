@@ -107,6 +107,67 @@ static Error ffmpeg_error(const char* code, const char* message, int ffmpeg_code
     return {code, message, buffer};
 }
 
+Result<void> set_required_encoder_option(AVCodecContext* context, const char* name, const char* value) {
+    const int result = av_opt_set(context->priv_data, name, value, 0);
+    if (result < 0) {
+        return Result<void>::Fail(ffmpeg_error("encoder_option_failed", "FFmpeg could not set a required NVENC option.", result));
+    }
+    return Result<void>::Ok();
+}
+
+Result<void> set_required_encoder_option_double(AVCodecContext* context, const char* name, double value) {
+    const int result = av_opt_set_double(context->priv_data, name, value, 0);
+    if (result < 0) {
+        return Result<void>::Fail(ffmpeg_error("encoder_option_failed", "FFmpeg could not set a required NVENC option.", result));
+    }
+    return Result<void>::Ok();
+}
+
+void set_optional_encoder_option_int(AVCodecContext* context, const char* name, std::int64_t value) {
+    const int result = av_opt_set_int(context->priv_data, name, value, 0);
+    if (result < 0) {
+        log_info(std::string("Skipping unsupported NVENC option: ") + name);
+    }
+}
+
+Result<void> configure_nvenc_quality(AVCodecContext* context) {
+    for (const auto& option : {
+             std::pair<const char*, const char*>{"preset", "p7"},
+             std::pair<const char*, const char*>{"tune", "hq"},
+             std::pair<const char*, const char*>{"rc", "vbr"},
+         }) {
+        const auto configured = set_required_encoder_option(context, option.first, option.second);
+        if (!configured.ok()) {
+            return configured;
+        }
+    }
+
+    const auto cq = set_required_encoder_option_double(context, "cq", 18.0);
+    if (!cq.ok()) {
+        return cq;
+    }
+
+    set_optional_encoder_option_int(context, "spatial_aq", 1);
+    set_optional_encoder_option_int(context, "temporal_aq", 1);
+    set_optional_encoder_option_int(context, "aq-strength", 8);
+    set_optional_encoder_option_int(context, "rc-lookahead", 32);
+    set_optional_encoder_option_int(context, "multipass", 2);
+    return Result<void>::Ok();
+}
+
+std::int64_t source_video_bit_rate(const AVFormatContext* format, const AVStream* stream, const AVCodecContext* decoder) {
+    if (stream != nullptr && stream->codecpar != nullptr && stream->codecpar->bit_rate > 0) {
+        return stream->codecpar->bit_rate;
+    }
+    if (decoder != nullptr && decoder->bit_rate > 0) {
+        return decoder->bit_rate;
+    }
+    if (format != nullptr && format->bit_rate > 0) {
+        return format->bit_rate;
+    }
+    return 0;
+}
+
 static double progress_from_frames(std::int64_t frames_done, std::int64_t frames_total) {
     return ffmpeg_progress_from_frames(frames_done, frames_total);
 }
@@ -774,6 +835,18 @@ Result<void> FfmpegTranscodePipeline::run(
     encoder_context->pix_fmt = AV_PIX_FMT_D3D11;
     encoder_context->sw_pix_fmt = encoder_sw_format;
     encoder_context->sample_aspect_ratio = decoder_context->sample_aspect_ratio;
+    const std::int64_t source_bit_rate = source_video_bit_rate(input.get(), input_stream, decoder_context.get());
+    const std::int64_t target_bit_rate = ffmpeg_recommended_nvenc_bitrate(
+        source_bit_rate,
+        decoder_context->width,
+        decoder_context->height,
+        output_width,
+        output_height,
+        av_q2d(frame_rate),
+        hdr_enabled);
+    encoder_context->bit_rate = target_bit_rate;
+    encoder_context->rc_max_rate = target_bit_rate + (target_bit_rate / 2);
+    encoder_context->rc_buffer_size = target_bit_rate * 2;
     encoder_context->hw_frames_ctx = av_buffer_ref(encoder_frames.value().get());
     if (encoder_context->hw_frames_ctx == nullptr) {
         return Result<void>::Fail({"encoder_frames_ref_failed", "FFmpeg could not reference the encoder D3D11 frames.", ""});
@@ -795,7 +868,14 @@ Result<void> FfmpegTranscodePipeline::run(
         encoder_context->colorspace = decoder_context->colorspace;
         encoder_context->color_range = decoder_context->color_range;
     }
-    av_opt_set(encoder_context->priv_data, "preset", "p4", 0);
+    const auto quality_configured = configure_nvenc_quality(encoder_context.get());
+    if (!quality_configured.ok()) {
+        return Result<void>::Fail(quality_configured.error());
+    }
+    log_info(
+        "NVENC quality configured: target_bitrate=" + std::to_string(target_bit_rate) +
+        ", maxrate=" + std::to_string(encoder_context->rc_max_rate) +
+        ", buffer=" + std::to_string(encoder_context->rc_buffer_size));
 
     result = avcodec_open2(encoder_context.get(), encoder, nullptr);
     if (result < 0) {
