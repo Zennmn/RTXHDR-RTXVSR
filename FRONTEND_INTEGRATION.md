@@ -1,6 +1,6 @@
 # Frontend Integration Guide
 
-This is the Windows local sidecar API for the future app.
+This is the Windows local sidecar API for the RTX Video Converter app.
 
 ## Backend Process
 
@@ -35,6 +35,36 @@ Response:
   "messages": []
 }
 ```
+
+## Media Probe
+
+`POST /api/media/probe`
+
+Use this endpoint after the user chooses an input file. It validates that the path points to a real file and returns the metadata used by the UI input panel.
+
+Request:
+
+```json
+{
+  "inputPath": "C:\\Videos\\input.mp4"
+}
+```
+
+Response:
+
+```json
+{
+  "path": "C:\\Videos\\input.mp4",
+  "name": "input.mp4",
+  "sizeBytes": 123456789,
+  "resolution": "1920x1080",
+  "duration": "00:01:30",
+  "codec": "h264 8-bit",
+  "warnings": []
+}
+```
+
+When the backend is built without FFmpeg support, file validation still runs, but detailed metadata may be empty and `warnings` explains that FFmpeg metadata probing is unavailable.
 
 ## Create Job
 
@@ -123,6 +153,7 @@ Response:
 
 - `GET /api/health`: `200`.
 - `GET /api/capabilities`: `200`.
+- `POST /api/media/probe`: `200` with media metadata on success; `400` for invalid JSON, missing input path, missing file, non-file path, or probe errors.
 - `POST /api/jobs`: `202` with `{ "id": "..." }` on success; `400` for invalid JSON, invalid paths, invalid parameter ranges, unsupported output options, or missing processing options; `503` when the server is shutting down.
 - `GET /api/jobs/{id}`: `200` with a job snapshot; `404` when the job id is unknown.
 - `POST /api/jobs/{id}/cancel`: `200` with `{ "accepted": true }` on success; `404` when the job id is unknown; `409` when the job already reached a terminal state; `400` for other cancel errors.
