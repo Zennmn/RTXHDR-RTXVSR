@@ -2,6 +2,7 @@
 
 #include "api/json_dto.h"
 #include "platform/capabilities.h"
+#include "video/media_probe_service.h"
 
 #include <nlohmann/json.hpp>
 
@@ -67,12 +68,47 @@ void HttpServer::stop() {
 }
 
 void HttpServer::bind_routes() {
+    server_.set_default_headers({
+        {"Access-Control-Allow-Origin", "*"},
+        {"Access-Control-Allow-Headers", "Content-Type"},
+        {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
+    });
+
+    server_.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& response) {
+        response.status = 204;
+    });
+
     server_.Get("/api/health", [](const httplib::Request&, httplib::Response& response) {
         set_json(response, {{"version", "0.1.0"}, {"ready", true}});
     });
 
     server_.Get("/api/capabilities", [](const httplib::Request&, httplib::Response& response) {
         set_json(response, capability_snapshot_to_json(detect_capabilities()));
+    });
+
+    server_.Post("/api/media/probe", [](const httplib::Request& request, httplib::Response& response) {
+        const auto body = nlohmann::json::parse(request.body, nullptr, false);
+        if (body.is_discarded()) {
+            response.status = 400;
+            set_json(response, error_to_json({"invalid_json", "Request JSON is invalid.", ""}));
+            return;
+        }
+
+        const auto parsed = parse_media_probe_request(body);
+        if (!parsed.ok()) {
+            response.status = 400;
+            set_json(response, error_to_json(parsed.error()));
+            return;
+        }
+
+        const auto probed = probe_media_for_ui(parsed.value().input_path);
+        if (!probed.ok()) {
+            response.status = 400;
+            set_json(response, error_to_json(probed.error()));
+            return;
+        }
+
+        set_json(response, media_probe_summary_to_json(probed.value()));
     });
 
     server_.Post("/api/jobs", [this](const httplib::Request& request, httplib::Response& response) {

@@ -39,6 +39,19 @@ Result<TranscodeRequest> parse_transcode_request(const nlohmann::json& json) {
     }
 }
 
+Result<MediaProbeRequest> parse_media_probe_request(const nlohmann::json& json) {
+    try {
+        MediaProbeRequest request;
+        request.input_path = json.value("inputPath", "");
+        if (request.input_path.empty()) {
+            return Result<MediaProbeRequest>::Fail({"input_path_required", "Input path is required.", ""});
+        }
+        return Result<MediaProbeRequest>::Ok(std::move(request));
+    } catch (const std::exception& ex) {
+        return Result<MediaProbeRequest>::Fail({"invalid_json", "Request JSON is invalid.", ex.what()});
+    }
+}
+
 nlohmann::json error_to_json(const Error& error) {
     return {
         {"error", {
@@ -73,6 +86,18 @@ nlohmann::json job_snapshot_to_json(const JobSnapshot& snapshot) {
     }
 
     return json;
+}
+
+nlohmann::json media_probe_summary_to_json(const MediaProbeSummary& summary) {
+    return {
+        {"path", summary.path},
+        {"name", summary.name},
+        {"sizeBytes", summary.size_bytes},
+        {"resolution", summary.resolution},
+        {"duration", summary.duration},
+        {"codec", summary.codec},
+        {"warnings", summary.warnings},
+    };
 }
 
 } // namespace vsr
