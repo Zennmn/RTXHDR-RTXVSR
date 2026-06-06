@@ -4,7 +4,9 @@
 #include "platform/capabilities.h"
 #include "video/media_probe_service.h"
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
+#include <utility>
 
 namespace vsr {
 
@@ -26,7 +28,8 @@ int status_for_cancel_error(const Error& error) {
 
 } // namespace
 
-HttpServer::HttpServer(JobStore& store, JobRunner& runner) : store_(store), runner_(runner) {
+HttpServer::HttpServer(JobStore& store, JobRunner& runner, HttpServerOptions options)
+    : store_(store), runner_(runner), options_(std::move(options)) {
     bind_routes();
     worker_thread_ = std::thread([this] { worker_loop(); });
 }
@@ -37,6 +40,43 @@ HttpServer::~HttpServer() {
 
 bool HttpServer::listen(const std::string& host, int port) {
     return server_.listen(host, port);
+}
+
+bool HttpServer::is_origin_allowed(const httplib::Request& request) const {
+    const auto origin = request.get_header_value("Origin");
+    if (origin.empty()) {
+        return true;
+    }
+    return std::find(options_.allowed_origins.begin(), options_.allowed_origins.end(), origin) != options_.allowed_origins.end();
+}
+
+bool HttpServer::authorize_private_request(const httplib::Request& request, httplib::Response& response) const {
+    apply_cors_headers(request, response);
+    if (!is_origin_allowed(request)) {
+        response.status = 403;
+        set_json(response, error_to_json({"forbidden_origin", "Request origin is not allowed.", request.get_header_value("Origin")}));
+        return false;
+    }
+    if (options_.auth_token.empty()) {
+        return true;
+    }
+    if (request.get_header_value("X-VSR-Token") == options_.auth_token) {
+        return true;
+    }
+    response.status = 401;
+    set_json(response, error_to_json({"unauthorized", "Backend authorization token is missing or invalid.", ""}));
+    return false;
+}
+
+void HttpServer::apply_cors_headers(const httplib::Request& request, httplib::Response& response) const {
+    const auto origin = request.get_header_value("Origin");
+    if (origin.empty() || !is_origin_allowed(request)) {
+        return;
+    }
+    response.set_header("Access-Control-Allow-Origin", origin);
+    response.set_header("Vary", "Origin");
+    response.set_header("Access-Control-Allow-Headers", "Content-Type, X-VSR-Token");
+    response.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 }
 
 void HttpServer::stop() {
@@ -68,25 +108,29 @@ void HttpServer::stop() {
 }
 
 void HttpServer::bind_routes() {
-    server_.set_default_headers({
-        {"Access-Control-Allow-Origin", "*"},
-        {"Access-Control-Allow-Headers", "Content-Type"},
-        {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
-    });
-
-    server_.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& response) {
+    server_.Options(R"(/api/.*)", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!is_origin_allowed(request)) {
+            response.status = 403;
+            return;
+        }
+        apply_cors_headers(request, response);
         response.status = 204;
     });
 
-    server_.Get("/api/health", [](const httplib::Request&, httplib::Response& response) {
+    server_.Get("/api/health", [this](const httplib::Request& request, httplib::Response& response) {
+        apply_cors_headers(request, response);
         set_json(response, {{"version", "0.1.0"}, {"ready", true}});
     });
 
-    server_.Get("/api/capabilities", [](const httplib::Request&, httplib::Response& response) {
+    server_.Get("/api/capabilities", [this](const httplib::Request& request, httplib::Response& response) {
+        apply_cors_headers(request, response);
         set_json(response, capability_snapshot_to_json(detect_capabilities()));
     });
 
-    server_.Post("/api/media/probe", [](const httplib::Request& request, httplib::Response& response) {
+    server_.Post("/api/media/probe", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_private_request(request, response)) {
+            return;
+        }
         const auto body = nlohmann::json::parse(request.body, nullptr, false);
         if (body.is_discarded()) {
             response.status = 400;
@@ -112,6 +156,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Post("/api/jobs", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_private_request(request, response)) {
+            return;
+        }
         const auto body = nlohmann::json::parse(request.body, nullptr, false);
         if (body.is_discarded()) {
             response.status = 400;
@@ -152,6 +199,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Get(R"(/api/jobs/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_private_request(request, response)) {
+            return;
+        }
         const auto snapshot = store_.get(request.matches[1].str());
         if (!snapshot.ok()) {
             response.status = 404;
@@ -163,6 +213,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Post(R"(/api/jobs/([^/]+)/cancel)", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_private_request(request, response)) {
+            return;
+        }
         const auto canceled = runner_.request_cancel(request.matches[1].str());
         if (!canceled.ok()) {
             response.status = status_for_cancel_error(canceled.error());

@@ -19,17 +19,22 @@
 
 namespace {
 
-int parse_port(int argc, char** argv) {
-    constexpr int default_port = 49321;
+struct CliOptions {
+    int port = 49321;
+    std::string auth_token;
+};
 
+CliOptions parse_cli_options(int argc, char** argv) {
+    CliOptions options;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--port" && i + 1 < argc) {
-            return std::stoi(argv[++i]);
+            options.port = std::stoi(argv[++i]);
+        } else if (arg == "--auth-token" && i + 1 < argc) {
+            options.auth_token = argv[++i];
         }
     }
-
-    return default_port;
+    return options;
 }
 
 std::filesystem::path default_log_directory() {
@@ -51,13 +56,14 @@ std::filesystem::path default_log_directory() {
 } // namespace
 
 int main(int argc, char** argv) {
-    int port = 49321;
+    CliOptions cli;
     try {
-        port = parse_port(argc, argv);
+        cli = parse_cli_options(argc, argv);
     } catch (const std::exception& ex) {
-        std::cerr << "Invalid --port: " << ex.what() << "\n";
+        std::cerr << "Invalid command line: " << ex.what() << "\n";
         return EXIT_FAILURE;
     }
+    const int port = cli.port;
 
     vsr::initialize_logging(default_log_directory());
     vsr::log_info("Starting vsr_backend on 127.0.0.1:" + std::to_string(port));
@@ -74,7 +80,16 @@ int main(int argc, char** argv) {
 #else
     vsr::JobRunner runner(store, std::make_unique<vsr::FakePipeline>(vsr::FakePipelineMode::succeeds));
 #endif
-    vsr::HttpServer server(store, runner);
+    vsr::HttpServerOptions server_options;
+    server_options.auth_token = cli.auth_token;
+    server_options.allowed_origins = {
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    };
+    vsr::HttpServer server(store, runner, std::move(server_options));
 
     if (!server.listen("127.0.0.1", port)) {
         vsr::log_error("Failed to listen on 127.0.0.1:" + std::to_string(port));

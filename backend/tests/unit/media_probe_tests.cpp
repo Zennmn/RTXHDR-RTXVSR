@@ -5,8 +5,18 @@
 
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <string_view>
 
 using namespace vsr;
+
+namespace {
+
+std::string from_u8(std::u8string_view value) {
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
+
+} // namespace
 
 TEST(MediaProbeDto, rejectsMissingInputPath) {
     const auto parsed = parse_media_probe_request(nlohmann::json::object());
@@ -62,4 +72,20 @@ TEST(MediaProbeService, returnsFallbackFileMetadataWhenDetailedProbeIsUnavailabl
     EXPECT_EQ(result.value().codec, "");
     ASSERT_FALSE(result.value().warnings.empty());
 #endif
+}
+
+TEST(MediaProbeService, acceptsUtf8NonAsciiFilePath) {
+    const auto path = std::filesystem::temp_directory_path() / std::filesystem::path(u8"vsr-\u6D4B\u8BD5\u89C6\u9891.bin");
+    const auto expected_name = from_u8(u8"vsr-\u6D4B\u8BD5\u89C6\u9891.bin");
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "abcd";
+    }
+
+    const auto result = probe_media_for_ui(from_u8(path.u8string()));
+
+    std::filesystem::remove(path);
+    ASSERT_TRUE(result.ok()) << result.error().code << ": " << result.error().details;
+    EXPECT_EQ(result.value().name, expected_name);
+    EXPECT_EQ(result.value().size_bytes, 4);
 }

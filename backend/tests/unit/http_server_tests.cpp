@@ -98,10 +98,10 @@ int reserve_unused_local_port() {
 
 class TestHttpServer {
 public:
-    TestHttpServer()
+    explicit TestHttpServer(HttpServerOptions options = {})
         : port_(reserve_unused_local_port()),
           runner_(store_, std::make_unique<FakePipeline>(FakePipelineMode::succeeds)),
-          server_(store_, runner_) {}
+          server_(store_, runner_, std::move(options)) {}
 
     ~TestHttpServer() {
         server_.stop();
@@ -142,7 +142,10 @@ private:
 } // namespace
 
 TEST(HttpServer, respondsToCorsPreflight) {
-    TestHttpServer server;
+    HttpServerOptions options;
+    options.allowed_origins = {"http://127.0.0.1:3000"};
+
+    TestHttpServer server(std::move(options));
     ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
     httplib::Headers headers{
@@ -156,7 +159,7 @@ TEST(HttpServer, respondsToCorsPreflight) {
     EXPECT_EQ(response->status, 204);
     const auto origin = response->headers.find("Access-Control-Allow-Origin");
     ASSERT_NE(origin, response->headers.end());
-    EXPECT_EQ(origin->second, "*");
+    EXPECT_EQ(origin->second, "http://127.0.0.1:3000");
 }
 
 TEST(HttpServer, rejectsInvalidProbeJson) {
@@ -190,4 +193,86 @@ TEST(HttpServer, probesExistingFileWithFallbackMetadata) {
     EXPECT_EQ(response->status, 200);
     EXPECT_NE(response->body.find("\"name\":\"vsr-http-probe.bin\""), std::string::npos);
     EXPECT_NE(response->body.find("\"sizeBytes\":6"), std::string::npos);
+}
+
+TEST(HttpServer, rejectsPrivateEndpointWithoutTokenWhenConfigured) {
+    HttpServerOptions options;
+    options.auth_token = "test-token";
+    options.allowed_origins = {"http://127.0.0.1:3000"};
+
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+
+    const auto response = client.Post("/api/media/probe", nlohmann::json{{"inputPath", "x"}}.dump(), "application/json");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 401);
+    EXPECT_NE(response->body.find("unauthorized"), std::string::npos);
+}
+
+TEST(HttpServer, acceptsPrivateEndpointWithTokenWhenConfigured) {
+    const auto path = std::filesystem::temp_directory_path() / "vsr-auth-probe.bin";
+    {
+        std::ofstream output(path, std::ios::binary);
+        output << "abcdef";
+    }
+
+    HttpServerOptions options;
+    options.auth_token = "test-token";
+    options.allowed_origins = {"http://127.0.0.1:3000"};
+
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+    httplib::Headers headers{{"X-VSR-Token", "test-token"}};
+
+    const auto response = client.Post("/api/media/probe", headers, nlohmann::json{{"inputPath", path.string()}}.dump(), "application/json");
+
+    std::filesystem::remove(path);
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+}
+
+TEST(HttpServer, doesNotAllowWildcardCorsForUntrustedOrigins) {
+    HttpServerOptions options;
+    options.auth_token = "test-token";
+    options.allowed_origins = {"http://127.0.0.1:3000"};
+
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+    httplib::Headers headers{
+        {"Origin", "https://example.invalid"},
+        {"Access-Control-Request-Method", "POST"},
+        {"Access-Control-Request-Headers", "Content-Type, X-VSR-Token"},
+    };
+
+    const auto response = client.Options("/api/jobs", headers);
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 403);
+    EXPECT_EQ(response->headers.find("Access-Control-Allow-Origin"), response->headers.end());
+}
+
+TEST(HttpServer, allowsConfiguredCorsOriginAndTokenHeader) {
+    HttpServerOptions options;
+    options.auth_token = "test-token";
+    options.allowed_origins = {"http://127.0.0.1:3000"};
+
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+    httplib::Headers headers{
+        {"Origin", "http://127.0.0.1:3000"},
+        {"Access-Control-Request-Method", "POST"},
+        {"Access-Control-Request-Headers", "Content-Type, X-VSR-Token"},
+    };
+
+    const auto response = client.Options("/api/jobs", headers);
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 204);
+    EXPECT_EQ(response->get_header_value("Access-Control-Allow-Origin"), "http://127.0.0.1:3000");
+    EXPECT_NE(response->get_header_value("Access-Control-Allow-Headers").find("X-VSR-Token"), std::string::npos);
 }

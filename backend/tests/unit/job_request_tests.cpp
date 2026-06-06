@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <string_view>
+
 using namespace vsr;
 
 namespace {
@@ -12,6 +15,10 @@ concept HasRequestField = requires(T value) {
 };
 
 static_assert(!HasRequestField<JobSnapshot>);
+
+std::string from_u8(std::u8string_view value) {
+    return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
 
 } // namespace
 
@@ -53,6 +60,18 @@ TEST(JobRequestValidation, rejectsCaseInsensitiveEquivalentInputAndOutputPath) {
     TranscodeRequest request;
     request.input_path = "C:\\Videos\\Input.mp4";
     request.output_path = "c:\\videos\\.\\INPUT.mp4";
+    request.processing.vsr.enabled = true;
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "output_path_matches_input_path");
+}
+
+TEST(JobRequestValidation, rejectsUtf8EquivalentInputAndOutputPath) {
+    TranscodeRequest request;
+    request.input_path = from_u8(u8"C:\\Videos\\\u6D4B\u8BD5.mp4");
+    request.output_path = from_u8(u8"c:/videos/./\u6D4B\u8BD5.mp4");
     request.processing.vsr.enabled = true;
 
     const auto result = validate_request(request);
