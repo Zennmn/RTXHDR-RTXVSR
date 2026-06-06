@@ -1,12 +1,15 @@
 #pragma once
 
+#include "platform/path_encoding.h"
 #include "video/rtx/rtx_processor.h"
 #include "video/video_pipeline.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <system_error>
 
 namespace vsr {
 
@@ -55,6 +58,72 @@ inline std::int64_t ffmpeg_recommended_nvenc_bitrate(
     const double pixel_based = output_pixels * safe_fps * bits_per_pixel_frame;
 
     return static_cast<std::int64_t>(std::llround(std::clamp(std::max(source_based, pixel_based), minimum_bit_rate, maximum_bit_rate)));
+}
+
+struct FfmpegOutputDestination {
+    std::filesystem::path final_path;
+    std::filesystem::path temp_path;
+    std::string final_path_utf8;
+    std::string temp_path_utf8;
+};
+
+inline std::filesystem::path ffmpeg_temporary_output_path(const std::filesystem::path& final_path) {
+    std::filesystem::path temp_path = final_path;
+    temp_path += ".partial";
+    return temp_path;
+}
+
+inline Result<FfmpegOutputDestination> ffmpeg_prepare_output_destination(const std::string& output_path) {
+    FfmpegOutputDestination destination;
+    destination.final_path = path_from_utf8(output_path);
+
+    std::error_code error;
+    if (std::filesystem::exists(destination.final_path, error)) {
+        return Result<FfmpegOutputDestination>::Fail({
+            "output_path_exists",
+            "Output path already exists.",
+            output_path
+        });
+    }
+    if (error) {
+        return Result<FfmpegOutputDestination>::Fail({
+            "output_path_check_failed",
+            "Could not inspect the output path.",
+            error.message()
+        });
+    }
+
+    destination.temp_path = ffmpeg_temporary_output_path(destination.final_path);
+    destination.final_path_utf8 = path_to_utf8(destination.final_path);
+    destination.temp_path_utf8 = path_to_utf8(destination.temp_path);
+    return Result<FfmpegOutputDestination>::Ok(std::move(destination));
+}
+
+inline Result<void> ffmpeg_commit_output_destination(const FfmpegOutputDestination& destination) {
+    std::error_code error;
+    std::filesystem::rename(destination.temp_path, destination.final_path, error);
+    if (error) {
+        return Result<void>::Fail({
+            "output_finalize_failed",
+            "The converted file could not be moved into place.",
+            error.message()
+        });
+    }
+    return Result<void>::Ok();
+}
+
+inline Result<void> ffmpeg_discard_output_destination(const FfmpegOutputDestination& destination) {
+    std::error_code error;
+    const bool removed = std::filesystem::remove(destination.temp_path, error);
+    if (error) {
+        return Result<void>::Fail({
+            "output_cleanup_failed",
+            "The partial output file could not be removed.",
+            error.message()
+        });
+    }
+    (void)removed;
+    return Result<void>::Ok();
 }
 
 class FfmpegTranscodePipeline final : public VideoPipeline {

@@ -101,6 +101,39 @@ using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using BufferRefPtr = std::unique_ptr<AVBufferRef, BufferRefDeleter>;
 
+class OutputDestinationGuard {
+public:
+    explicit OutputDestinationGuard(FfmpegOutputDestination destination)
+        : destination_(std::move(destination)) {}
+
+    ~OutputDestinationGuard() {
+        if (committed_) {
+            return;
+        }
+        const auto discarded = ffmpeg_discard_output_destination(destination_);
+        if (!discarded.ok()) {
+            log_info("Failed to remove partial output file: " + destination_.temp_path_utf8 + " (" + discarded.error().details + ")");
+        }
+    }
+
+    const FfmpegOutputDestination& destination() const noexcept {
+        return destination_;
+    }
+
+    Result<void> commit() {
+        const auto committed = ffmpeg_commit_output_destination(destination_);
+        if (!committed.ok()) {
+            return committed;
+        }
+        committed_ = true;
+        return Result<void>::Ok();
+    }
+
+private:
+    FfmpegOutputDestination destination_;
+    bool committed_ = false;
+};
+
 static Error ffmpeg_error(const char* code, const char* message, int ffmpeg_code) {
     char buffer[AV_ERROR_MAX_STRING_SIZE] = {};
     av_strerror(ffmpeg_code, buffer, sizeof(buffer));
@@ -657,8 +690,9 @@ Result<void> FfmpegTranscodePipeline::run(
     CancellationToken& cancellation,
     ProgressCallback progress) {
     log_info("FFmpeg pipeline starting: " + request.input_path + " -> " + request.output_path);
+    const std::filesystem::path input_path = path_from_utf8(request.input_path);
     std::error_code input_status_error;
-    const bool input_exists = std::filesystem::exists(request.input_path, input_status_error);
+    const bool input_exists = std::filesystem::exists(input_path, input_status_error);
     if (input_status_error) {
         return Result<void>::Fail({
             "input_access_failed",
@@ -683,6 +717,11 @@ Result<void> FfmpegTranscodePipeline::run(
     if (cancellation.requested.load()) {
         return canceled_result("before initialization");
     }
+    const auto output_destination = ffmpeg_prepare_output_destination(request.output_path);
+    if (!output_destination.ok()) {
+        return Result<void>::Fail(output_destination.error());
+    }
+    OutputDestinationGuard output_guard(std::move(output_destination.value()));
 
     if (progress) {
         JobProgress validating;
@@ -787,7 +826,7 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     AVFormatContext* raw_output = nullptr;
-    result = avformat_alloc_output_context2(&raw_output, nullptr, "mp4", request.output_path.c_str());
+    result = avformat_alloc_output_context2(&raw_output, nullptr, "mp4", output_guard.destination().final_path_utf8.c_str());
     if (result < 0 || raw_output == nullptr) {
         return Result<void>::Fail(result < 0
             ? ffmpeg_error("output_context_alloc_failed", "FFmpeg could not create an MP4 output context.", result)
@@ -965,7 +1004,7 @@ Result<void> FfmpegTranscodePipeline::run(
     rtx_shutdown.activate();
 
     if (output->oformat != nullptr && (output->oformat->flags & AVFMT_NOFILE) == 0) {
-        result = avio_open(&output->pb, request.output_path.c_str(), AVIO_FLAG_WRITE);
+        result = avio_open(&output->pb, output_guard.destination().temp_path_utf8.c_str(), AVIO_FLAG_WRITE);
         if (result < 0) {
             return Result<void>::Fail(ffmpeg_error(
                 "output_open_failed",
@@ -1243,6 +1282,10 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     rtx_shutdown.release();
+    const auto committed_output = output_guard.commit();
+    if (!committed_output.ok()) {
+        return Result<void>::Fail(committed_output.error());
+    }
     log_info("FFmpeg pipeline completed: " + request.output_path);
     if (progress) {
         JobProgress finalizing;
