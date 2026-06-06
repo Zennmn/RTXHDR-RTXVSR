@@ -24,7 +24,20 @@ export class ApiError extends Error {
 
 async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
-  return text.length > 0 ? JSON.parse(text) : {};
+  if (text.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new ApiError({
+      code: 'invalid_response_json',
+      message: 'Backend returned invalid JSON.',
+      details: error instanceof Error ? error.message : String(error),
+      status: response.status,
+    });
+  }
 }
 
 function isErrorBody(value: unknown): value is BackendErrorBody {
@@ -37,7 +50,13 @@ function isErrorBody(value: unknown): value is BackendErrorBody {
 }
 
 export class BackendClient {
+  private authToken = '';
+
   constructor(private readonly baseUrl = import.meta.env.VITE_BACKEND_BASE_URL ?? 'http://127.0.0.1:49321') {}
+
+  setAuthToken(token: string): void {
+    this.authToken = token;
+  }
 
   async getHealth(): Promise<HealthResponse> {
     return this.request('/api/health');
@@ -73,13 +92,17 @@ export class BackendClient {
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((init.headers as Record<string, string> | undefined) ?? {}),
+    };
+    if (this.authToken.length > 0) {
+      headers['X-VSR-Token'] = this.authToken;
+    }
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         ...init,
-        headers: {
-          'Content-Type': 'application/json',
-          ...init.headers,
-        },
+        headers,
       });
     } catch (error) {
       throw new ApiError({

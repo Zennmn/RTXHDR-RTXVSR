@@ -43,4 +43,32 @@ describe('BackendClient', () => {
     await expect(client.getHealth()).rejects.toBeInstanceOf(ApiError);
     await expect(client.getHealth()).rejects.toMatchObject({ code: 'network_error' });
   });
+
+  it('adds auth token header when configured', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ version: '0.1.0', ready: true })));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const client = new BackendClient('http://127.0.0.1:49321');
+    client.setAuthToken('secret-token');
+    await client.getHealth();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:49321/api/health',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-VSR-Token': 'secret-token' }),
+      }),
+    );
+  });
+
+  it('turns invalid json responses into ApiError', async () => {
+    globalThis.fetch = vi.fn(async () => new Response('<html>nope</html>', { status: 500 })) as typeof fetch;
+
+    const client = new BackendClient('http://127.0.0.1:49321');
+
+    await expect(client.getHealth()).rejects.toMatchObject({
+      code: 'invalid_response_json',
+      message: 'Backend returned invalid JSON.',
+      status: 500,
+    });
+  });
 });

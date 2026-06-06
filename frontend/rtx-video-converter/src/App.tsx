@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
-import { backendClient } from './api/backendClient';
+import { ApiError, backendClient } from './api/backendClient';
 import { CapabilityBanner } from './components/CapabilityBanner';
 import { ErrorDetails } from './components/ErrorDetails';
 import { InputPanel } from './components/InputPanel';
@@ -8,6 +8,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { StatusFooter } from './components/StatusFooter';
 import { useBackendStatus } from './hooks/useBackendStatus';
 import { useTranscodeJob } from './hooks/useTranscodeJob';
+import { canStartConversion, isActiveJobSnapshot, missingCapabilityReason } from './lib/jobState';
 import { buildOutputPath, buildTranscodeRequest, defaultSettings, directoryName } from './lib/jobRequest';
 import { pickInputVideo, pickOutputDirectory } from './lib/tauriBridge';
 import type { ConversionSettings, SelectedInput } from './types';
@@ -19,6 +20,7 @@ export default function App() {
   const [outputDirectory, setOutputDirectory] = useState('');
   const [settings, setSettings] = useState<ConversionSettings>(defaultSettings);
   const [loadingInput, setLoadingInput] = useState(false);
+  const [inputError, setInputError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     if (settings.mode === 'hdr' || settings.mode === 'both') {
@@ -28,12 +30,21 @@ export default function App() {
 
   const resolvedOutputDirectory = outputDirectory || directoryName(selectedInput.path);
   const outputPath = selectedInput.path ? buildOutputPath(selectedInput.path, resolvedOutputDirectory) : '';
-  const canStart =
-    backend.status !== 'offline' &&
-    !loadingInput &&
-    selectedInput.path.length > 0 &&
-    resolvedOutputDirectory.length > 0 &&
-    job.activeJob === null;
+  const selectedCodec = settings.mode === 'hdr' || settings.mode === 'both' ? 'hevc' : settings.codec;
+  const jobIsActive = isActiveJobSnapshot(job.activeJob);
+  const capabilityError = missingCapabilityReason(backend.capabilities, settings.mode, selectedCodec);
+  const canStart = canStartConversion({
+    runtime: backend.runtime,
+    backendStatus: backend.status,
+    loadingInput,
+    inputPath: selectedInput.path,
+    outputDirectory: resolvedOutputDirectory,
+    hasMetadata: selectedInput.metadata !== null,
+    activeJob: job.activeJob,
+    capabilities: backend.capabilities,
+    mode: settings.mode,
+    codec: selectedCodec,
+  });
 
   const loadInput = async (path: string) => {
     if (!path) {
@@ -41,6 +52,7 @@ export default function App() {
     }
 
     setLoadingInput(true);
+    setInputError(null);
     setSelectedInput({ path, metadata: null });
     if (outputDirectory.length === 0) {
       setOutputDirectory(directoryName(path));
@@ -49,6 +61,18 @@ export default function App() {
     try {
       const metadata = await backendClient.probeMedia(path);
       setSelectedInput({ path, metadata });
+    } catch (error) {
+      setSelectedInput({ path, metadata: null });
+      setInputError(
+        error instanceof ApiError
+          ? error
+          : new ApiError({
+              code: 'media_probe_failed',
+              message: 'Media probe failed.',
+              details: error instanceof Error ? error.message : String(error),
+              status: 0,
+            }),
+      );
     } finally {
       setLoadingInput(false);
     }
@@ -69,6 +93,18 @@ export default function App() {
   };
 
   const start = async () => {
+    if (capabilityError !== null) {
+      setInputError(
+        new ApiError({
+          code: 'capability_unavailable',
+          message: capabilityError,
+          details: '',
+          status: 0,
+        }),
+      );
+      return;
+    }
+
     await job.startJob(
       buildTranscodeRequest({
         inputPath: selectedInput.path,
@@ -108,7 +144,8 @@ export default function App() {
             void loadInput(path);
           }}
           onInputPathChange={(path) => {
-            setSelectedInput((current) => ({ ...current, path }));
+            setInputError(null);
+            setSelectedInput({ path, metadata: null });
           }}
           onOutputDirectoryChange={setOutputDirectory}
         />
@@ -116,13 +153,13 @@ export default function App() {
         <section className="flex grow flex-col overflow-y-auto">
           <div className="space-y-4 p-6">
             <CapabilityBanner capabilities={backend.capabilities} message={loadingInput ? '正在探测媒体信息...' : backend.message} />
-            <ErrorDetails error={job.error} />
+            <ErrorDetails error={inputError ?? job.error} />
           </div>
           <SettingsPanel
             settings={settings}
             capabilities={backend.capabilities}
             inputResolution={selectedInput.metadata?.resolution ?? null}
-            disabled={job.activeJob !== null}
+            disabled={jobIsActive}
             onChange={setSettings}
           />
         </section>

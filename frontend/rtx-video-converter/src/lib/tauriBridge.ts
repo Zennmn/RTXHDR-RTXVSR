@@ -1,8 +1,18 @@
+import { backendClient } from '../api/backendClient';
+
 type SidecarChild = {
   kill: () => Promise<void>;
 };
 
 let backendChild: SidecarChild | null = null;
+let backendAuthToken = '';
+
+function getOrCreateBackendAuthToken(): string {
+  if (backendAuthToken.length === 0) {
+    backendAuthToken = crypto.randomUUID();
+  }
+  return backendAuthToken;
+}
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -16,8 +26,10 @@ export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tau
     return { runtime: 'tauri', started: true };
   }
 
+  const token = getOrCreateBackendAuthToken();
+  backendClient.setAuthToken(token);
   const { Command } = await import('@tauri-apps/plugin-shell');
-  const command = Command.sidecar('binaries/vsr_backend', ['--port', String(port)]);
+  const command = Command.sidecar('binaries/vsr_backend', ['--port', String(port), '--auth-token', token]);
   backendChild = (await command.spawn()) as SidecarChild;
   return { runtime: 'tauri', started: true };
 }

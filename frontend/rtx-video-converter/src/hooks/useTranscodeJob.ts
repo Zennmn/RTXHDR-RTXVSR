@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, backendClient } from '../api/backendClient';
 import type { JobSnapshot, TranscodeRequest } from '../api/types';
-
-const ACTIVE_STATES = new Set(['queued', 'running', 'canceling']);
+import { errorFromJobSnapshot, isActiveJobSnapshot } from '../lib/jobState';
 
 export interface TranscodeJobState {
   activeJob: JobSnapshot | null;
@@ -68,6 +67,13 @@ export function useTranscodeJob(): TranscodeJobState {
       if (nextError instanceof ApiError && nextError.status === 409) {
         const snapshot = await backendClient.getJob(activeJobId.current);
         setActiveJob(snapshot);
+        const jobError = errorFromJobSnapshot(snapshot);
+        if (jobError !== null) {
+          setError(jobError);
+        }
+        if (!isActiveJobSnapshot(snapshot)) {
+          activeJobId.current = null;
+        }
       } else {
         setError(nextError instanceof ApiError ? nextError : null);
       }
@@ -97,7 +103,11 @@ export function useTranscodeJob(): TranscodeJobState {
       try {
         const snapshot = await backendClient.getJob(activeJobId.current);
         setActiveJob(snapshot);
-        if (!ACTIVE_STATES.has(snapshot.state)) {
+        const jobError = errorFromJobSnapshot(snapshot);
+        if (jobError !== null) {
+          setError(jobError);
+        }
+        if (!isActiveJobSnapshot(snapshot)) {
           activeJobId.current = null;
         }
       } catch (nextError) {
