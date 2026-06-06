@@ -2,6 +2,8 @@ import type { CapabilityResponse } from '../api/types';
 
 export function CapabilityBanner({ capabilities, message }: { capabilities: CapabilityResponse | null; message: string }) {
   const messages = capabilities?.messages ?? [];
+  const vsrStatus = capabilities === null ? '检测中' : capabilities.vsrAvailable ? '可用' : '不可用';
+  const hdrStatus = capabilities === null ? '检测中' : capabilities.truehdrAvailable ? '可用' : '不可用';
 
   return (
     <div className="rounded-xl border border-[#e5e5e5] bg-white p-4 shadow-sm">
@@ -11,7 +13,7 @@ export function CapabilityBanner({ capabilities, message }: { capabilities: Capa
           <p className="text-xs text-[#5a5a5a]">{message}</p>
         </div>
         <div className="text-[11px] text-[#5a5a5a]">
-          VSR {capabilities?.vsrAvailable ? '可用' : '不可用'} / HDR {capabilities?.truehdrAvailable ? '可用' : '不可用'}
+          VSR {vsrStatus} / HDR {hdrStatus}
         </div>
       </div>
       {messages.length > 0 && (
