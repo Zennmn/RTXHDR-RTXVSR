@@ -1,11 +1,13 @@
 param(
-  [string]$BackendExe = "..\..\build\backend\Debug\vsr_backend.exe"
+  [string]$BackendExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "tauri-packaging-common.ps1")
+
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$BackendPath = Resolve-Path (Join-Path $ProjectRoot $BackendExe)
+$BackendPath = Resolve-BackendExecutablePath -ProjectRoot $ProjectRoot -BackendExe $BackendExe
 $BackendDirectory = Split-Path -Parent $BackendPath
 $BinariesDir = Join-Path $ProjectRoot "src-tauri\binaries"
 $RuntimeDir = Join-Path $ProjectRoot "src-tauri\runtime"
@@ -21,13 +23,22 @@ if ([string]::IsNullOrWhiteSpace($TargetTriple)) {
 
 New-Item -ItemType Directory -Force -Path $BinariesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+Get-ChildItem -LiteralPath $BinariesDir -Filter "vsr_backend-*.exe" -File -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem -LiteralPath $BinariesDir -Filter *.dll -File -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem -LiteralPath $RuntimeDir -Filter *.dll -File -ErrorAction SilentlyContinue | Remove-Item -Force
+
 $Destination = Join-Path $BinariesDir "vsr_backend-$TargetTriple.exe"
 Copy-Item -LiteralPath $BackendPath -Destination $Destination -Force
 
 # Copy adjacent runtime DLLs so the packaged app can launch the sidecar with
-# FFmpeg and RTX runtime dependencies present beside the final executable.
-Get-ChildItem -LiteralPath $BackendDirectory -Filter *.dll | ForEach-Object {
-  Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $RuntimeDir $_.Name) -Force
+# FFmpeg and RTX runtime dependencies present beside the sidecar during dev,
+# and inside the packaged app resources for installer/portable builds.
+Get-AdjacentRuntimeLibraryPaths -BackendDirectory $BackendDirectory | ForEach-Object {
+  $runtimeLibraryPath = $_
+  $fileName = Split-Path -Leaf $runtimeLibraryPath
+  Copy-Item -LiteralPath $runtimeLibraryPath -Destination (Join-Path $BinariesDir $fileName) -Force
+  Copy-Item -LiteralPath $runtimeLibraryPath -Destination (Join-Path $RuntimeDir $fileName) -Force
 }
 
 Write-Host "Prepared sidecar: $Destination"
+Write-Host "Backend source: $BackendPath"
