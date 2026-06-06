@@ -5,6 +5,7 @@ export function StatusFooter({
   canStart,
   submitting,
   canceling,
+  disabledReason,
   onStart,
   onCancel,
 }: {
@@ -12,6 +13,7 @@ export function StatusFooter({
   canStart: boolean;
   submitting: boolean;
   canceling: boolean;
+  disabledReason: string | null;
   onStart: () => void;
   onCancel: () => void;
 }) {
@@ -46,6 +48,7 @@ export function StatusFooter({
       >
         {active ? (canceling ? '正在取消...' : '取消任务') : submitting ? '提交中...' : '开始转码'}
       </button>
+      {!active && disabledReason !== null && <span className="max-w-56 text-xs text-[#7a7a7a]">{disabledReason}</span>}
     </footer>
   );
 }

@@ -9,6 +9,7 @@ export function InputPanel({
   onBrowseOutput,
   onDropPath,
   onInputPathChange,
+  onInputPathCommit,
   onOutputDirectoryChange,
 }: {
   inputPath: string;
@@ -19,6 +20,7 @@ export function InputPanel({
   onBrowseOutput: () => void;
   onDropPath: (path: string) => void;
   onInputPathChange: (path: string) => void;
+  onInputPathCommit: (path: string) => void;
   onOutputDirectoryChange: (path: string) => void;
 }) {
   return (
@@ -49,6 +51,12 @@ export function InputPanel({
             type="text"
             value={inputPath}
             onChange={(event) => onInputPathChange(event.target.value)}
+            onBlur={(event) => onInputPathCommit(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                onInputPathCommit(event.currentTarget.value);
+              }
+            }}
             className="w-full rounded border border-[#d1d1d1] bg-white px-2 py-1.5 text-xs shadow-sm focus:border-[#0067c0] focus:outline-none"
             placeholder="浏览器开发模式下可手动输入路径"
           />
