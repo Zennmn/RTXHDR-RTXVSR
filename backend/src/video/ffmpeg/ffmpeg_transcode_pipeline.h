@@ -4,9 +4,13 @@
 #include "video/video_pipeline.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <string>
+#include <system_error>
 
 namespace vsr {
 
@@ -55,6 +59,76 @@ inline std::int64_t ffmpeg_recommended_nvenc_bitrate(
     const double pixel_based = output_pixels * safe_fps * bits_per_pixel_frame;
 
     return static_cast<std::int64_t>(std::llround(std::clamp(std::max(source_based, pixel_based), minimum_bit_rate, maximum_bit_rate)));
+}
+
+inline std::filesystem::path ffmpeg_temporary_output_path(const std::filesystem::path& final_output) {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto filename = final_output.filename().string() + ".vsr-" + std::to_string(stamp) + ".tmp";
+    return final_output.parent_path() / filename;
+}
+
+inline Result<void> ffmpeg_validate_output_target(const std::filesystem::path& final_output) {
+    const std::filesystem::path parent = final_output.parent_path();
+    if (!parent.empty()) {
+        std::error_code directory_error;
+        const bool directory_exists = std::filesystem::exists(parent, directory_error);
+        if (directory_error) {
+            return Result<void>::Fail({
+                "output_directory_access_failed",
+                "Output directory could not be checked.",
+                parent.string() + ": " + directory_error.message()
+            });
+        }
+        if (!directory_exists) {
+            return Result<void>::Fail({"output_directory_missing", "Output directory does not exist.", parent.string()});
+        }
+        std::error_code type_error;
+        const bool is_directory = std::filesystem::is_directory(parent, type_error);
+        if (type_error) {
+            return Result<void>::Fail({
+                "output_directory_access_failed",
+                "Output directory could not be checked.",
+                parent.string() + ": " + type_error.message()
+            });
+        }
+        if (!is_directory) {
+            return Result<void>::Fail({"output_directory_missing", "Output target parent is not a directory.", parent.string()});
+        }
+    }
+
+    std::error_code output_error;
+    const bool output_exists = std::filesystem::exists(final_output, output_error);
+    if (output_error) {
+        return Result<void>::Fail({
+            "output_access_failed",
+            "Output file could not be checked.",
+            final_output.string() + ": " + output_error.message()
+        });
+    }
+    if (output_exists) {
+        return Result<void>::Fail({"output_file_exists", "Output file already exists.", final_output.string()});
+    }
+
+    return Result<void>::Ok();
+}
+
+inline Result<void> ffmpeg_replace_output_file(const std::filesystem::path& temporary_output, const std::filesystem::path& final_output) {
+    const auto valid = ffmpeg_validate_output_target(final_output);
+    if (!valid.ok()) {
+        return Result<void>::Fail(valid.error());
+    }
+
+    std::error_code rename_error;
+    std::filesystem::rename(temporary_output, final_output, rename_error);
+    if (rename_error) {
+        return Result<void>::Fail({
+            "output_replace_failed",
+            "Temporary output could not be moved into place.",
+            temporary_output.string() + " -> " + final_output.string() + ": " + rename_error.message()
+        });
+    }
+
+    return Result<void>::Ok();
 }
 
 class FfmpegTranscodePipeline final : public VideoPipeline {
