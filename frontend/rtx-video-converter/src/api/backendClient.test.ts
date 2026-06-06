@@ -16,6 +16,22 @@ describe('BackendClient', () => {
     await expect(client.getHealth()).resolves.toEqual({ version: '0.1.0', ready: true });
   });
 
+  it('requests app-owned backend shutdown', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ accepted: true }))) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const client = new BackendClient('http://127.0.0.1:49321');
+    await expect(client.shutdownAppBackend('session-123')).resolves.toEqual({ accepted: true });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:49321/api/app/shutdown', {
+      method: 'POST',
+      body: JSON.stringify({ appSessionId: 'session-123' }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+  });
+
   it('parses backend error envelopes', async () => {
     globalThis.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ error: { code: 'invalid_json', message: 'Bad JSON', details: 'line 1' } }), {

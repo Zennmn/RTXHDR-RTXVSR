@@ -1,11 +1,26 @@
+import type { HealthResponse } from '../api/types';
+
 type SidecarChild = {
   kill: () => Promise<void>;
 };
 
 let backendChild: SidecarChild | null = null;
+let backendSessionId: string | null = null;
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+export function createAppSessionId(): string {
+  return crypto.randomUUID();
+}
+
+export function healthMatchesSession(health: HealthResponse, appSessionId: string): boolean {
+  return health.appSessionId === appSessionId;
+}
+
+export function currentBackendSessionId(): string | null {
+  return backendSessionId;
 }
 
 export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tauri' | 'browser'; started: boolean }> {
@@ -16,10 +31,18 @@ export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tau
     return { runtime: 'tauri', started: true };
   }
 
-  const { Command } = await import('@tauri-apps/plugin-shell');
-  const command = Command.sidecar('binaries/vsr_backend', ['--port', String(port)]);
-  backendChild = (await command.spawn()) as SidecarChild;
-  return { runtime: 'tauri', started: true };
+  const appSessionId = createAppSessionId();
+  backendSessionId = appSessionId;
+  try {
+    const { Command } = await import('@tauri-apps/plugin-shell');
+    const command = Command.sidecar('binaries/vsr_backend', ['--port', String(port), '--app-session-id', appSessionId]);
+    backendChild = (await command.spawn()) as SidecarChild;
+    return { runtime: 'tauri', started: true };
+  } catch (error) {
+    backendChild = null;
+    backendSessionId = null;
+    throw error;
+  }
 }
 
 export async function stopBackendSidecar(): Promise<void> {
@@ -28,8 +51,21 @@ export async function stopBackendSidecar(): Promise<void> {
   }
 
   const child = backendChild;
+  const appSessionId = backendSessionId;
   backendChild = null;
-  await child.kill();
+  backendSessionId = null;
+  try {
+    if (appSessionId !== null) {
+      const { backendClient } = await import('../api/backendClient');
+      await backendClient.shutdownAppBackend(appSessionId);
+    }
+  } finally {
+    try {
+      await child.kill();
+    } catch {
+      // The app-owned shutdown route may already have ended the sidecar.
+    }
+  }
 }
 
 export async function pickInputVideo(): Promise<string | null> {

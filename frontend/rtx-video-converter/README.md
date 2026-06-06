@@ -35,6 +35,8 @@ npm run tauri:dev
 
 Tauri requires Rust and Cargo in `PATH`.
 
+The packaged app is single-instance. Starting the executable again focuses the existing window instead of launching a second sidecar backend.
+
 ## Windows Packaging
 
 Build the installer:
