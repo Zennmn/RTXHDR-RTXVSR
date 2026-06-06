@@ -7,6 +7,10 @@ type SidecarChild = {
 let backendChild: SidecarChild | null = null;
 let backendAuthToken = '';
 
+const defaultBrowserBackendPort = 49321;
+const sidecarPortStart = 49321;
+const sidecarPortCount = 1000;
+
 function getOrCreateBackendAuthToken(): string {
   if (backendAuthToken.length === 0) {
     backendAuthToken = crypto.randomUUID();
@@ -14,12 +18,23 @@ function getOrCreateBackendAuthToken(): string {
   return backendAuthToken;
 }
 
+function backendBaseUrl(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}
+
+function chooseBackendPort(): number {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return sidecarPortStart + (values[0] % sidecarPortCount);
+}
+
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tauri' | 'browser'; started: boolean }> {
+export async function startBackendSidecar(port = chooseBackendPort()): Promise<{ runtime: 'tauri' | 'browser'; started: boolean }> {
   if (!isTauriRuntime()) {
+    backendClient.setBaseUrl(backendBaseUrl(defaultBrowserBackendPort));
     return { runtime: 'browser', started: false };
   }
   if (backendChild !== null) {
@@ -27,6 +42,7 @@ export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tau
   }
 
   const token = getOrCreateBackendAuthToken();
+  backendClient.setBaseUrl(backendBaseUrl(port));
   backendClient.setAuthToken(token);
   const { Command } = await import('@tauri-apps/plugin-shell');
   const command = Command.sidecar('binaries/vsr_backend', ['--port', String(port), '--auth-token', token]);

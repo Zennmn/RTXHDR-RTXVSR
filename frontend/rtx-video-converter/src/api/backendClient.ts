@@ -52,7 +52,11 @@ function isErrorBody(value: unknown): value is BackendErrorBody {
 export class BackendClient {
   private authToken = '';
 
-  constructor(private readonly baseUrl = import.meta.env.VITE_BACKEND_BASE_URL ?? 'http://127.0.0.1:49321') {}
+  constructor(private baseUrl = import.meta.env.VITE_BACKEND_BASE_URL ?? 'http://127.0.0.1:49321') {}
+
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = baseUrl;
+  }
 
   setAuthToken(token: string): void {
     this.authToken = token;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { backendClient } from '../api/backendClient';
 import type { CapabilityResponse, HealthResponse } from '../api/types';
-import { startBackendSidecar } from '../lib/tauriBridge';
+import { startBackendSidecar, stopBackendSidecar } from '../lib/tauriBridge';
 
 export type BackendStatus = 'starting' | 'ready' | 'offline' | 'degraded';
 
@@ -27,6 +27,30 @@ async function waitForHealth(): Promise<HealthResponse> {
   throw lastError;
 }
 
+async function loadBackend(): Promise<{
+  runtime: 'tauri' | 'browser';
+  health: HealthResponse;
+  capabilities: CapabilityResponse;
+}> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; ++attempt) {
+    let sidecar: Awaited<ReturnType<typeof startBackendSidecar>> | null = null;
+    try {
+      sidecar = await startBackendSidecar();
+      const health = await waitForHealth();
+      const capabilities = await backendClient.getCapabilities();
+      return { runtime: sidecar.runtime, health, capabilities };
+    } catch (error) {
+      lastError = error;
+      if (sidecar?.runtime !== 'tauri') {
+        break;
+      }
+      await stopBackendSidecar().catch(() => undefined);
+    }
+  }
+  throw lastError;
+}
+
 export function useBackendStatus(): BackendStatusState {
   const [status, setStatus] = useState<BackendStatus>('starting');
   const [runtime, setRuntime] = useState<'tauri' | 'browser'>('browser');
@@ -38,10 +62,8 @@ export function useBackendStatus(): BackendStatusState {
     setStatus('starting');
     setMessage('正在连接后端...');
     try {
-      const sidecar = await startBackendSidecar();
-      setRuntime(sidecar.runtime);
-      const nextHealth = await waitForHealth();
-      const nextCapabilities = await backendClient.getCapabilities();
+      const { runtime: nextRuntime, health: nextHealth, capabilities: nextCapabilities } = await loadBackend();
+      setRuntime(nextRuntime);
       setHealth(nextHealth);
       setCapabilities(nextCapabilities);
       const degraded = nextCapabilities.messages.length > 0;
