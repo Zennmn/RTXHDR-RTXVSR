@@ -19,6 +19,42 @@ if ([string]::IsNullOrWhiteSpace($TargetTriple)) {
   throw "rustc did not return a host target triple."
 }
 
+$ValidationSessionId = "11111111-2222-3333-4444-555555555555"
+$ValidationPort = Get-Random -Minimum 49152 -Maximum 65500
+$ValidationProcess = $null
+try {
+  $ValidationProcess = Start-Process -FilePath $BackendPath -ArgumentList @(
+    "--port",
+    [string]$ValidationPort,
+    "--app-session-id",
+    $ValidationSessionId
+  ) -PassThru -WindowStyle Hidden
+
+  $Health = $null
+  for ($Attempt = 0; $Attempt -lt 20; $Attempt++) {
+    Start-Sleep -Milliseconds 250
+    try {
+      $Health = Invoke-RestMethod -Uri "http://127.0.0.1:$ValidationPort/api/health" -TimeoutSec 1
+      break
+    } catch {
+      if ($ValidationProcess.HasExited) {
+        break
+      }
+    }
+  }
+
+  if ($null -eq $Health) {
+    throw "Backend sidecar validation failed: health endpoint did not respond."
+  }
+  if ($Health.appSessionId -ne $ValidationSessionId) {
+    throw "Backend sidecar validation failed: /api/health did not echo --app-session-id. Rebuild the backend before packaging."
+  }
+} finally {
+  if ($null -ne $ValidationProcess -and -not $ValidationProcess.HasExited) {
+    Stop-Process -Id $ValidationProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+}
+
 New-Item -ItemType Directory -Force -Path $BinariesDir | Out-Null
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
 $Destination = Join-Path $BinariesDir "vsr_backend-$TargetTriple.exe"
