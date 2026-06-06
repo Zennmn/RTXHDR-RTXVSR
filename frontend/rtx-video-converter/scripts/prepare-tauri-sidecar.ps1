@@ -1,5 +1,5 @@
 param(
-  [string]$BackendExe = "..\..\build\backend\Debug\vsr_backend.exe"
+  [string]$BackendExe = "..\..\build\backend-hw\Release\vsr_backend.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +28,23 @@ Copy-Item -LiteralPath $BackendPath -Destination $Destination -Force
 # FFmpeg and RTX runtime dependencies present beside the final executable.
 Get-ChildItem -LiteralPath $BackendDirectory -Filter *.dll | ForEach-Object {
   Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $RuntimeDir $_.Name) -Force
+}
+
+$RequiredRuntimeDlls = @(
+  "avcodec-62.dll",
+  "avformat-62.dll",
+  "avutil-60.dll",
+  "swresample-6.dll",
+  "swscale-9.dll",
+  "nvngx_vsr.dll",
+  "nvngx_truehdr.dll"
+)
+
+foreach ($RequiredRuntimeDll in $RequiredRuntimeDlls) {
+  $Candidate = Join-Path $RuntimeDir $RequiredRuntimeDll
+  if (-not (Test-Path -LiteralPath $Candidate)) {
+    throw "Required runtime DLL missing after sidecar preparation: $RequiredRuntimeDll"
+  }
 }
 
 Write-Host "Prepared sidecar: $Destination"

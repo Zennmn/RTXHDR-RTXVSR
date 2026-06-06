@@ -39,6 +39,14 @@ The packaged app is single-instance. Starting the executable again focuses the e
 
 ## Windows Packaging
 
+Before packaging, build the hardware backend in:
+
+```text
+..\..\build\backend-hw\Release\vsr_backend.exe
+```
+
+`npm run tauri:build` prepares that backend as the Tauri sidecar and fails if required FFmpeg or RTX runtime DLLs are missing.
+
 Build the installer:
 
 ```powershell
