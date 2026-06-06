@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <utility>
+
 namespace vsr {
 
 namespace {
@@ -26,7 +28,10 @@ int status_for_cancel_error(const Error& error) {
 
 } // namespace
 
-HttpServer::HttpServer(JobStore& store, JobRunner& runner) : store_(store), runner_(runner) {
+HttpServer::HttpServer(JobStore& store, JobRunner& runner) : HttpServer(store, runner, {}) {}
+
+HttpServer::HttpServer(JobStore& store, JobRunner& runner, HttpServerOptions options)
+    : store_(store), runner_(runner), options_(std::move(options)) {
     bind_routes();
     worker_thread_ = std::thread([this] { worker_loop(); });
 }
@@ -78,8 +83,39 @@ void HttpServer::bind_routes() {
         response.status = 204;
     });
 
-    server_.Get("/api/health", [](const httplib::Request&, httplib::Response& response) {
-        set_json(response, {{"version", "0.1.0"}, {"ready", true}});
+    server_.Get("/api/health", [this](const httplib::Request&, httplib::Response& response) {
+        nlohmann::json body{{"version", "0.1.0"}, {"ready", true}};
+        if (!options_.app_session_id.empty()) {
+            body["appSessionId"] = options_.app_session_id;
+        }
+        set_json(response, body);
+    });
+
+    server_.Post("/api/app/shutdown", [this](const httplib::Request& request, httplib::Response& response) {
+        if (options_.app_session_id.empty()) {
+            response.status = 404;
+            set_json(response, error_to_json({"app_shutdown_unavailable", "App shutdown is unavailable.", ""}));
+            return;
+        }
+
+        const auto body = nlohmann::json::parse(request.body, nullptr, false);
+        if (body.is_discarded()) {
+            response.status = 400;
+            set_json(response, error_to_json({"invalid_json", "Request JSON is invalid.", ""}));
+            return;
+        }
+
+        const auto requested_session = body.value("appSessionId", "");
+        if (requested_session != options_.app_session_id) {
+            response.status = 403;
+            set_json(response, error_to_json({"app_session_mismatch", "App session id does not match.", ""}));
+            return;
+        }
+
+        set_json(response, {{"accepted", true}});
+        std::thread([this] {
+            server_.stop();
+        }).detach();
     });
 
     server_.Get("/api/capabilities", [](const httplib::Request&, httplib::Response& response) {

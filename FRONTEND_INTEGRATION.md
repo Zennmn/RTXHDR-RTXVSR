@@ -6,6 +6,14 @@ This is the Windows local sidecar API for the RTX Video Converter app.
 
 Start `vsr_backend.exe --port 49321` as a local sidecar process. The backend listens only on `127.0.0.1`.
 
+Packaged apps that own the backend process should launch it with a per-run session id:
+
+```powershell
+vsr_backend.exe --port 49321 --app-session-id <opaque-session-id>
+```
+
+The session id lets the frontend confirm that it is talking to the backend instance it launched and request shutdown of only that owned instance. Standalone launches can omit `--app-session-id`; app-owned shutdown is then unavailable.
+
 ## Health
 
 `GET http://127.0.0.1:49321/api/health`
@@ -14,6 +22,12 @@ Response:
 
 ```json
 { "version": "0.1.0", "ready": true }
+```
+
+When launched with `--app-session-id`, health includes the owner session:
+
+```json
+{ "version": "0.1.0", "ready": true, "appSessionId": "<opaque-session-id>" }
 ```
 
 ## Capabilities
@@ -149,6 +163,26 @@ Response:
 { "accepted": true }
 ```
 
+## App Shutdown
+
+`POST /api/app/shutdown`
+
+Use this only when the frontend launched the backend with `--app-session-id`.
+
+Request:
+
+```json
+{ "appSessionId": "<opaque-session-id>" }
+```
+
+Response:
+
+```json
+{ "accepted": true }
+```
+
+The backend accepts shutdown only when the request session id matches the configured session id. On success, it returns immediately and stops the HTTP server asynchronously.
+
 ## HTTP Statuses
 
 - `GET /api/health`: `200`.
@@ -157,6 +191,7 @@ Response:
 - `POST /api/jobs`: `202` with `{ "id": "..." }` on success; `400` for invalid JSON, invalid paths, invalid parameter ranges, unsupported output options, or missing processing options; `503` when the server is shutting down.
 - `GET /api/jobs/{id}`: `200` with a job snapshot; `404` when the job id is unknown.
 - `POST /api/jobs/{id}/cancel`: `200` with `{ "accepted": true }` on success; `404` when the job id is unknown; `409` when the job already reached a terminal state; `400` for other cancel errors.
+- `POST /api/app/shutdown`: `200` with `{ "accepted": true }` on session match; `404` with `app_shutdown_unavailable` when the backend was not launched with an app session; `400` with `invalid_json` for malformed JSON; `403` with `app_session_mismatch` when the session id does not match.
 
 Error responses always use:
 
