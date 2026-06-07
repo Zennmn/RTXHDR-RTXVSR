@@ -52,6 +52,9 @@ export function useBackendStatus(): BackendStatusState {
       setStatus(degraded ? 'degraded' : 'ready');
       setMessage(degraded ? '后端已连接，但部分能力不可用。' : '后端已就绪。');
     } catch (error) {
+      if (currentBackendSessionId() !== null) {
+        await stopBackendSidecar().catch(() => undefined);
+      }
       setHealth(null);
       setCapabilities(null);
       setStatus('offline');
