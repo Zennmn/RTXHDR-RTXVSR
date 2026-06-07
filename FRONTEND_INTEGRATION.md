@@ -21,13 +21,13 @@ The session id lets the frontend confirm that it is talking to the backend insta
 Response:
 
 ```json
-{ "version": "0.1.0", "ready": true }
+{ "version": "0.1.1", "ready": true }
 ```
 
 When launched with `--app-session-id`, health includes the owner session:
 
 ```json
-{ "version": "0.1.0", "ready": true, "appSessionId": "<opaque-session-id>" }
+{ "version": "0.1.1", "ready": true, "appSessionId": "<opaque-session-id>" }
 ```
 
 ## Capabilities

@@ -171,7 +171,7 @@ TEST(HttpServer, healthIncludesAppSessionIdWhenConfigured) {
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 200);
     const auto body = nlohmann::json::parse(response->body);
-    EXPECT_EQ(body.at("version"), "0.1.0");
+    EXPECT_EQ(body.at("version"), "0.1.1");
     EXPECT_EQ(body.at("ready"), true);
     EXPECT_EQ(body.at("appSessionId"), "test-session-123");
 }

@@ -84,7 +84,7 @@ void HttpServer::bind_routes() {
     });
 
     server_.Get("/api/health", [this](const httplib::Request&, httplib::Response& response) {
-        nlohmann::json body{{"version", "0.1.0"}, {"ready", true}};
+        nlohmann::json body{{"version", "0.1.1"}, {"ready", true}};
         if (!options_.app_session_id.empty()) {
             body["appSessionId"] = options_.app_session_id;
         }
