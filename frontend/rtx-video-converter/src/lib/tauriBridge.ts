@@ -4,6 +4,12 @@ type SidecarChild = {
   kill: () => Promise<void>;
 };
 
+type TauriDragDropPayload = {
+  type: string;
+  paths?: string[];
+  [key: string]: unknown;
+};
+
 let backendChild: SidecarChild | null = null;
 let backendSessionId: string | null = null;
 
@@ -21,6 +27,29 @@ export function healthMatchesSession(health: HealthResponse, appSessionId: strin
 
 export function currentBackendSessionId(): string | null {
   return backendSessionId;
+}
+
+export function tauriDropPath(payload: TauriDragDropPayload): string | null {
+  if (payload.type !== 'drop') {
+    return null;
+  }
+
+  const path = payload.paths?.[0]?.trim();
+  return path && path.length > 0 ? path : null;
+}
+
+export async function listenForDroppedInputPath(onPath: (path: string) => void): Promise<(() => void) | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const path = tauriDropPath(event.payload);
+    if (path !== null) {
+      onPath(path);
+    }
+  });
 }
 
 export async function startBackendSidecar(port = 49321): Promise<{ runtime: 'tauri' | 'browser'; started: boolean }> {

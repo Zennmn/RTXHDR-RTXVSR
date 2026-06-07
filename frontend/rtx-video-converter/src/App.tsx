@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { ApiError, backendClient } from './api/backendClient';
 import { CapabilityBanner } from './components/CapabilityBanner';
@@ -11,7 +11,7 @@ import { useTranscodeJob } from './hooks/useTranscodeJob';
 import { conversionCapabilityProblem } from './lib/capabilities';
 import { nextOutputDirectoryForInput } from './lib/inputSelection';
 import { buildOutputPath, buildTranscodeRequest, defaultSettings, directoryName } from './lib/jobRequest';
-import { pickInputVideo, pickOutputDirectory } from './lib/tauriBridge';
+import { listenForDroppedInputPath, pickInputVideo, pickOutputDirectory } from './lib/tauriBridge';
 import type { ConversionSettings, SelectedInput } from './types';
 
 export default function App() {
@@ -57,7 +57,7 @@ export default function App() {
     inputError === null &&
     job.activeJob === null;
 
-  const loadInput = async (path: string) => {
+  const loadInput = useCallback(async (path: string) => {
     const trimmedPath = path.trim();
     if (!trimmedPath) {
       return;
@@ -89,7 +89,27 @@ export default function App() {
     } finally {
       setLoadingInput(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    void listenForDroppedInputPath((path) => {
+      void loadInput(path);
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup?.();
+        return;
+      }
+      unlisten = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [loadInput]);
 
   const chooseInput = async () => {
     const path = await pickInputVideo();

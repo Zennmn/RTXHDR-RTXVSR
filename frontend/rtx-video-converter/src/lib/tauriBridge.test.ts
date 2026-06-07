@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAppSessionId, currentBackendSessionId, healthMatchesSession } from './tauriBridge';
+import { createAppSessionId, currentBackendSessionId, healthMatchesSession, tauriDropPath } from './tauriBridge';
 
 describe('tauriBridge session helpers', () => {
   it('creates app session ids with crypto.randomUUID', () => {
@@ -18,5 +18,14 @@ describe('tauriBridge session helpers', () => {
 
   it('has no backend session before a Tauri sidecar starts', () => {
     expect(currentBackendSessionId()).toBeNull();
+  });
+
+  it('extracts the first real file path from Tauri drop events', () => {
+    expect(tauriDropPath({ type: 'drop', paths: ['C:\\Videos\\clip.mp4'], position: { x: 12, y: 34 } })).toBe('C:\\Videos\\clip.mp4');
+  });
+
+  it('ignores non-drop Tauri drag events and empty drops', () => {
+    expect(tauriDropPath({ type: 'enter', paths: ['C:\\Videos\\clip.mp4'], position: { x: 12, y: 34 } })).toBeNull();
+    expect(tauriDropPath({ type: 'drop', paths: [], position: { x: 12, y: 34 } })).toBeNull();
   });
 });
