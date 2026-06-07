@@ -14,22 +14,36 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace {
 
-int parse_port(int argc, char** argv) {
-    constexpr int default_port = 49321;
+struct ProgramOptions {
+    int port = 49321;
+    std::string app_session_id;
+};
 
+ProgramOptions parse_arguments(int argc, char** argv) {
+    ProgramOptions options;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-        if (arg == "--port" && i + 1 < argc) {
-            return std::stoi(argv[++i]);
+        if (arg == "--port") {
+            if (i + 1 >= argc) {
+                throw std::invalid_argument("--port requires a value");
+            }
+            options.port = std::stoi(argv[++i]);
+        } else if (arg == "--app-session-id") {
+            if (i + 1 >= argc) {
+                throw std::invalid_argument("--app-session-id requires a value");
+            }
+            options.app_session_id = argv[++i];
         }
     }
 
-    return default_port;
+    return options;
 }
 
 std::filesystem::path default_log_directory() {
@@ -51,16 +65,16 @@ std::filesystem::path default_log_directory() {
 } // namespace
 
 int main(int argc, char** argv) {
-    int port = 49321;
+    ProgramOptions options;
     try {
-        port = parse_port(argc, argv);
+        options = parse_arguments(argc, argv);
     } catch (const std::exception& ex) {
-        std::cerr << "Invalid --port: " << ex.what() << "\n";
+        std::cerr << "Invalid arguments: " << ex.what() << "\n";
         return EXIT_FAILURE;
     }
 
     vsr::initialize_logging(default_log_directory());
-    vsr::log_info("Starting vsr_backend on 127.0.0.1:" + std::to_string(port));
+    vsr::log_info("Starting vsr_backend on 127.0.0.1:" + std::to_string(options.port));
     vsr::log_info("Log file: " + vsr::current_log_path().string());
 
     vsr::JobStore store;
@@ -74,11 +88,13 @@ int main(int argc, char** argv) {
 #else
     vsr::JobRunner runner(store, std::make_unique<vsr::FakePipeline>(vsr::FakePipelineMode::succeeds));
 #endif
-    vsr::HttpServer server(store, runner);
+    vsr::HttpServerOptions server_options;
+    server_options.app_session_id = options.app_session_id;
+    vsr::HttpServer server(store, runner, std::move(server_options));
 
-    if (!server.listen("127.0.0.1", port)) {
-        vsr::log_error("Failed to listen on 127.0.0.1:" + std::to_string(port));
-        std::cerr << "Failed to listen on 127.0.0.1:" << port << "\n";
+    if (!server.listen("127.0.0.1", options.port)) {
+        vsr::log_error("Failed to listen on 127.0.0.1:" + std::to_string(options.port));
+        std::cerr << "Failed to listen on 127.0.0.1:" << options.port << "\n";
         return EXIT_FAILURE;
     }
 

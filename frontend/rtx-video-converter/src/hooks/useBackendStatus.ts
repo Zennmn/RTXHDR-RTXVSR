@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { backendClient } from '../api/backendClient';
 import type { CapabilityResponse, HealthResponse } from '../api/types';
-import { startBackendSidecar } from '../lib/tauriBridge';
+import { currentBackendSessionId, healthMatchesSession, startBackendSidecar, stopBackendSidecar } from '../lib/tauriBridge';
 
 export type BackendStatus = 'starting' | 'ready' | 'offline' | 'degraded';
 
@@ -41,6 +41,10 @@ export function useBackendStatus(): BackendStatusState {
       const sidecar = await startBackendSidecar();
       setRuntime(sidecar.runtime);
       const nextHealth = await waitForHealth();
+      const appSessionId = currentBackendSessionId();
+      if (sidecar.runtime === 'tauri' && appSessionId !== null && !healthMatchesSession(nextHealth, appSessionId)) {
+        throw new Error('Connected backend does not belong to this app session. Please stop the stale backend and try again.');
+      }
       const nextCapabilities = await backendClient.getCapabilities();
       setHealth(nextHealth);
       setCapabilities(nextCapabilities);
@@ -48,6 +52,9 @@ export function useBackendStatus(): BackendStatusState {
       setStatus(degraded ? 'degraded' : 'ready');
       setMessage(degraded ? '后端已连接，但部分能力不可用。' : '后端已就绪。');
     } catch (error) {
+      if (currentBackendSessionId() !== null) {
+        await stopBackendSidecar().catch(() => undefined);
+      }
       setHealth(null);
       setCapabilities(null);
       setStatus('offline');
@@ -57,6 +64,11 @@ export function useBackendStatus(): BackendStatusState {
 
   useEffect(() => {
     void refresh();
+    return () => {
+      if (currentBackendSessionId() !== null) {
+        void stopBackendSidecar();
+      }
+    };
   }, []);
 
   return { status, runtime, health, capabilities, message, refresh };

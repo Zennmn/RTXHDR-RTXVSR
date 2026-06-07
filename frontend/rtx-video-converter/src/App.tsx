@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
-import { backendClient } from './api/backendClient';
+import { ApiError, backendClient } from './api/backendClient';
 import { CapabilityBanner } from './components/CapabilityBanner';
 import { ErrorDetails } from './components/ErrorDetails';
 import { InputPanel } from './components/InputPanel';
@@ -8,14 +8,18 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { StatusFooter } from './components/StatusFooter';
 import { useBackendStatus } from './hooks/useBackendStatus';
 import { useTranscodeJob } from './hooks/useTranscodeJob';
+import { conversionCapabilityProblem } from './lib/capabilities';
+import { nextOutputDirectoryForInput } from './lib/inputSelection';
 import { buildOutputPath, buildTranscodeRequest, defaultSettings, directoryName } from './lib/jobRequest';
-import { pickInputVideo, pickOutputDirectory } from './lib/tauriBridge';
+import { listenForDroppedInputPath, pickInputVideo, pickOutputDirectory } from './lib/tauriBridge';
 import type { ConversionSettings, SelectedInput } from './types';
 
 export default function App() {
   const backend = useBackendStatus();
   const job = useTranscodeJob();
   const [selectedInput, setSelectedInput] = useState<SelectedInput>({ path: '', metadata: null });
+  const [inputPathDraft, setInputPathDraft] = useState('');
+  const [inputError, setInputError] = useState<ApiError | null>(null);
   const [outputDirectory, setOutputDirectory] = useState('');
   const [settings, setSettings] = useState<ConversionSettings>(defaultSettings);
   const [loadingInput, setLoadingInput] = useState(false);
@@ -28,31 +32,84 @@ export default function App() {
 
   const resolvedOutputDirectory = outputDirectory || directoryName(selectedInput.path);
   const outputPath = selectedInput.path ? buildOutputPath(selectedInput.path, resolvedOutputDirectory) : '';
+  const capabilityProblem = conversionCapabilityProblem(backend.capabilities, settings);
+  const disabledReason =
+    job.activeJob === null
+      ? inputError?.message ??
+        capabilityProblem ??
+        (backend.status === 'offline'
+          ? '后端服务不可用。'
+          : loadingInput
+            ? '正在探测媒体信息...'
+            : selectedInput.metadata === null
+              ? '请选择并成功探测输入视频。'
+              : resolvedOutputDirectory.length === 0
+                ? '请选择输出目录。'
+                : null)
+      : null;
   const canStart =
     backend.status !== 'offline' &&
     !loadingInput &&
     selectedInput.path.length > 0 &&
+    selectedInput.metadata !== null &&
     resolvedOutputDirectory.length > 0 &&
+    capabilityProblem === null &&
+    inputError === null &&
     job.activeJob === null;
 
-  const loadInput = async (path: string) => {
-    if (!path) {
+  const loadInput = useCallback(async (path: string) => {
+    const trimmedPath = path.trim();
+    if (!trimmedPath) {
       return;
     }
 
+    setInputError(null);
     setLoadingInput(true);
-    setSelectedInput({ path, metadata: null });
-    if (outputDirectory.length === 0) {
-      setOutputDirectory(directoryName(path));
-    }
+    setInputPathDraft(trimmedPath);
+    setSelectedInput({ path: '', metadata: null });
+    setOutputDirectory((current) => nextOutputDirectoryForInput(trimmedPath, current));
 
     try {
-      const metadata = await backendClient.probeMedia(path);
-      setSelectedInput({ path, metadata });
+      const metadata = await backendClient.probeMedia(trimmedPath);
+      setSelectedInput({ path: trimmedPath, metadata });
+      setInputPathDraft(trimmedPath);
+      setInputError(null);
+    } catch (error) {
+      setSelectedInput({ path: '', metadata: null });
+      setInputError(
+        error instanceof ApiError
+          ? error
+          : new ApiError({
+              code: 'probe_error',
+              message: '无法探测输入视频。',
+              details: error instanceof Error ? error.message : String(error),
+              status: 0,
+            }),
+      );
     } finally {
       setLoadingInput(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    void listenForDroppedInputPath((path) => {
+      void loadInput(path);
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup?.();
+        return;
+      }
+      unlisten = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [loadInput]);
 
   const chooseInput = async () => {
     const path = await pickInputVideo();
@@ -94,7 +151,7 @@ export default function App() {
 
       <main className="flex flex-1 overflow-hidden">
         <InputPanel
-          inputPath={selectedInput.path}
+          inputPath={inputPathDraft}
           metadata={selectedInput.metadata}
           outputDirectory={outputDirectory}
           outputPath={outputPath}
@@ -107,16 +164,13 @@ export default function App() {
           onDropPath={(path) => {
             void loadInput(path);
           }}
-          onInputPathChange={(path) => {
-            setSelectedInput((current) => ({ ...current, path }));
-          }}
           onOutputDirectoryChange={setOutputDirectory}
         />
 
         <section className="flex grow flex-col overflow-y-auto">
           <div className="space-y-4 p-6">
             <CapabilityBanner capabilities={backend.capabilities} message={loadingInput ? '正在探测媒体信息...' : backend.message} />
-            <ErrorDetails error={job.error} />
+            <ErrorDetails error={inputError ?? job.error} />
           </div>
           <SettingsPanel
             settings={settings}
@@ -133,6 +187,7 @@ export default function App() {
         canStart={canStart}
         submitting={job.submitting || loadingInput}
         canceling={job.canceling}
+        disabledReason={disabledReason}
         onStart={() => {
           void start();
         }}

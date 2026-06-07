@@ -22,6 +22,7 @@ export interface BackendErrorBody {
 export interface HealthResponse {
   version: string;
   ready: boolean;
+  appSessionId?: string;
 }
 
 export interface CapabilityResponse {

@@ -71,6 +71,13 @@ export class BackendClient {
     });
   }
 
+  async shutdownAppBackend(appSessionId: string): Promise<{ accepted: boolean }> {
+    return this.request('/api/app/shutdown', {
+      method: 'POST',
+      body: JSON.stringify({ appSessionId }),
+    });
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {

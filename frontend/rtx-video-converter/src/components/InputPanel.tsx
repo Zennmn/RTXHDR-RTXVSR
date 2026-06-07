@@ -8,7 +8,6 @@ export function InputPanel({
   onBrowseFile,
   onBrowseOutput,
   onDropPath,
-  onInputPathChange,
   onOutputDirectoryChange,
 }: {
   inputPath: string;
@@ -18,7 +17,6 @@ export function InputPanel({
   onBrowseFile: () => void;
   onBrowseOutput: () => void;
   onDropPath: (path: string) => void;
-  onInputPathChange: (path: string) => void;
   onOutputDirectoryChange: (path: string) => void;
 }) {
   return (
@@ -48,9 +46,10 @@ export function InputPanel({
           <input
             type="text"
             value={inputPath}
-            onChange={(event) => onInputPathChange(event.target.value)}
-            className="w-full rounded border border-[#d1d1d1] bg-white px-2 py-1.5 text-xs shadow-sm focus:border-[#0067c0] focus:outline-none"
-            placeholder="浏览器开发模式下可手动输入路径"
+            readOnly
+            className="w-full cursor-default rounded border border-[#d1d1d1] bg-[#f9f9f9] px-2 py-1.5 text-xs text-[#5a5a5a] shadow-sm focus:outline-none"
+            placeholder="拖拽视频或点击浏览选择文件"
+            title={inputPath || '拖拽视频或点击浏览选择文件'}
           />
         </div>
 

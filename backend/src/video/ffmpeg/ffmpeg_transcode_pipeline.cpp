@@ -101,6 +101,23 @@ using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using FramePtr = std::unique_ptr<AVFrame, FrameDeleter>;
 using BufferRefPtr = std::unique_ptr<AVBufferRef, BufferRefDeleter>;
 
+class TemporaryOutputCleanupGuard {
+public:
+    explicit TemporaryOutputCleanupGuard(std::filesystem::path path) : path_(std::move(path)) {}
+    ~TemporaryOutputCleanupGuard() {
+        if (active_) {
+            std::error_code ignored;
+            std::filesystem::remove(path_, ignored);
+        }
+    }
+
+    void release() { active_ = false; }
+
+private:
+    std::filesystem::path path_;
+    bool active_ = true;
+};
+
 static Error ffmpeg_error(const char* code, const char* message, int ffmpeg_code) {
     char buffer[AV_ERROR_MAX_STRING_SIZE] = {};
     av_strerror(ffmpeg_code, buffer, sizeof(buffer));
@@ -669,6 +686,14 @@ Result<void> FfmpegTranscodePipeline::run(
     if (!input_exists) {
         return Result<void>::Fail({"input_not_found", "Input file does not exist.", request.input_path});
     }
+    const std::filesystem::path final_output_path(request.output_path);
+    const auto output_target = ffmpeg_validate_output_target(final_output_path);
+    if (!output_target.ok()) {
+        return Result<void>::Fail(output_target.error());
+    }
+    const std::filesystem::path temporary_output_path = ffmpeg_temporary_output_path(final_output_path);
+    TemporaryOutputCleanupGuard temporary_output_cleanup(temporary_output_path);
+
     if (rtx_ == nullptr) {
         return Result<void>::Fail({
             "rtx_processor_required",
@@ -787,11 +812,12 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     AVFormatContext* raw_output = nullptr;
-    result = avformat_alloc_output_context2(&raw_output, nullptr, "mp4", request.output_path.c_str());
+    const std::string temporary_output_string = temporary_output_path.string();
+    result = avformat_alloc_output_context2(&raw_output, nullptr, "mp4", temporary_output_string.c_str());
     if (result < 0 || raw_output == nullptr) {
         return Result<void>::Fail(result < 0
             ? ffmpeg_error("output_context_alloc_failed", "FFmpeg could not create an MP4 output context.", result)
-            : Error{"output_context_alloc_failed", "FFmpeg could not create an MP4 output context.", request.output_path});
+            : Error{"output_context_alloc_failed", "FFmpeg could not create an MP4 output context.", temporary_output_string});
     }
     OutputFormatContextPtr output(raw_output);
 
@@ -965,7 +991,7 @@ Result<void> FfmpegTranscodePipeline::run(
     rtx_shutdown.activate();
 
     if (output->oformat != nullptr && (output->oformat->flags & AVFMT_NOFILE) == 0) {
-        result = avio_open(&output->pb, request.output_path.c_str(), AVIO_FLAG_WRITE);
+        result = avio_open(&output->pb, temporary_output_string.c_str(), AVIO_FLAG_WRITE);
         if (result < 0) {
             return Result<void>::Fail(ffmpeg_error(
                 "output_open_failed",
@@ -1241,6 +1267,22 @@ Result<void> FfmpegTranscodePipeline::run(
             "FFmpeg could not write the MP4 trailer.",
             result));
     }
+
+    if (output->pb != nullptr && output->oformat != nullptr && (output->oformat->flags & AVFMT_NOFILE) == 0) {
+        result = avio_closep(&output->pb);
+        if (result < 0) {
+            return Result<void>::Fail(ffmpeg_error(
+                "output_close_failed",
+                "FFmpeg could not close the temporary output file.",
+                result));
+        }
+    }
+
+    const auto replaced = ffmpeg_replace_output_file(temporary_output_path, final_output_path);
+    if (!replaced.ok()) {
+        return Result<void>::Fail(replaced.error());
+    }
+    temporary_output_cleanup.release();
 
     rtx_shutdown.release();
     log_info("FFmpeg pipeline completed: " + request.output_path);

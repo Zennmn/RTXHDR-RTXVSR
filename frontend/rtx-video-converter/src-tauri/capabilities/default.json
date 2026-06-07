@@ -12,7 +12,12 @@
         {
           "name": "binaries/vsr_backend",
           "sidecar": true,
-          "args": ["--port", { "validator": "\\d{2,5}" }]
+          "args": [
+            "--port",
+            { "validator": "\\d{2,5}" },
+            "--app-session-id",
+            { "validator": "[0-9a-fA-F-]{36}" }
+          ]
         }
       ]
     },

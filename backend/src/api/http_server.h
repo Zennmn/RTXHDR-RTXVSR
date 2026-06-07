@@ -13,9 +13,14 @@
 
 namespace vsr {
 
+struct HttpServerOptions {
+    std::string app_session_id;
+};
+
 class HttpServer {
 public:
     HttpServer(JobStore& store, JobRunner& runner);
+    HttpServer(JobStore& store, JobRunner& runner, HttpServerOptions options);
     ~HttpServer();
 
     HttpServer(const HttpServer&) = delete;
@@ -31,6 +36,7 @@ private:
 
     JobStore& store_;
     JobRunner& runner_;
+    HttpServerOptions options_;
     httplib::Server server_;
     std::mutex worker_mutex_;
     std::condition_variable worker_cv_;
