@@ -8,6 +8,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { StatusFooter } from './components/StatusFooter';
 import { useBackendStatus } from './hooks/useBackendStatus';
 import { useTranscodeJob } from './hooks/useTranscodeJob';
+import appIconUrl from './assets/app-icon.png';
 import { conversionCapabilityProblem } from './lib/capabilities';
 import { nextOutputDirectoryForInput } from './lib/inputSelection';
 import { buildOutputPath, buildTranscodeRequest, defaultSettings, directoryName } from './lib/jobRequest';
@@ -139,7 +140,7 @@ export default function App() {
     <div className="flex h-screen flex-col overflow-hidden border border-[#d1d1d1] bg-[#f3f3f3] font-sans text-[#1a1a1a] select-none">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#e5e5e5] bg-[#f9f9f9] px-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-[#76b900] text-xs font-bold text-white">RTX</div>
+          <img className="h-7 w-7 rounded-sm" src={appIconUrl} alt="" />
           <h1 className="text-sm font-semibold text-[#1d1d1d]">RTX Video Converter</h1>
         </div>
         <div className="flex items-center gap-4">

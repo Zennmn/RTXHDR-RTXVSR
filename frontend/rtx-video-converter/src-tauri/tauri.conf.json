@@ -23,6 +23,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
     "externalBin": ["binaries/vsr_backend"],
     "resources": {
       "runtime/": ""
