@@ -164,12 +164,6 @@ export default function App() {
           onDropPath={(path) => {
             void loadInput(path);
           }}
-          onInputPathChange={(path) => {
-            setInputPathDraft(path);
-          }}
-          onInputPathCommit={(path) => {
-            void loadInput(path);
-          }}
           onOutputDirectoryChange={setOutputDirectory}
         />
 
