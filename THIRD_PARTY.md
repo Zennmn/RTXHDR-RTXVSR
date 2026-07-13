@@ -7,10 +7,12 @@ Third-party software, SDKs, libraries, binaries, drivers, and assets are not rel
 ## NVIDIA RTX Video SDK
 
 - The repository does not vendor the NVIDIA RTX Video SDK source tree, headers, libraries, or runtime DLLs into git.
-- Building with real RTX VSR / HDR support depends on the NVIDIA RTX Video SDK and its separate license terms.
+- Release packages incorporate NVIDIA RTX Video SDK object code and the `nvngx_vsr.dll` / `nvngx_truehdr.dll` runtime materials under NVIDIA's separate license terms.
 - NVIDIA SDK materials are proprietary. Do not assume they become MIT-licensed just because this repository integrates with them.
 - If you modify or distribute software that includes NVIDIA SDK materials, sample-derived code, or NVIDIA runtime binaries, you must comply with the NVIDIA RTX SDK license that applies to those materials.
 - In particular, do not redistribute the SDK as a standalone product, and keep any required NVIDIA notices intact.
+- The SDK license does not grant audio/video codec patent rights. Commercial distributors must evaluate the patent licensing requirements for their codecs, territories, and use cases.
+- NVIDIA mark attribution, release notification, and any required written trademark approval are external release prerequisites; see `docs/NVIDIA_RELEASE_CHECKLIST.md`.
 
 Reference:
 - Official NVIDIA page: <https://developer.nvidia.com/rtx-video-sdk>
@@ -20,11 +22,14 @@ Reference:
 ## FFmpeg
 
 - This repository does not vendor FFmpeg source code or binaries into git.
-- Release builds may bundle FFmpeg DLLs beside the backend executable, depending on how the local FFmpeg build is prepared.
-- FFmpeg is generally available under LGPL 2.1-or-later, but some optional components are GPL-only or otherwise more restrictive.
-- If you distribute builds that include FFmpeg binaries, you are responsible for complying with the license of the exact FFmpeg build you ship.
+- Release 1.0.0 bundles unmodified FFmpeg shared libraries built from commit `a09be9b91e8e1219f297586873b0d7322b47df96`.
+- The build uses only FFmpeg's built-in LGPL code plus MIT-licensed `nv-codec-headers` commit `15ee32753c92faddbabbff11676779618fc6db7e`.
+- GPL, nonfree, libx264, libx265, and other optional third-party codec libraries are not enabled.
+- The reproducible recipe is `third_party/ffmpeg/Dockerfile`; `build-minimal-ffmpeg.ps1` produces the exact source archives and complete configure log.
+- The corresponding-source archive is published beside each binary release. For v1.0.0 it is `RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip`.
+- The application dynamically links to these DLLs. Users may replace them with ABI-compatible modified FFmpeg builds.
 
-If you want the surrounding application to stay outside GPL obligations, use an LGPL-compatible FFmpeg build and follow FFmpeg's distribution checklist, including:
+Release builders must keep the pinned LGPL-compatible recipe and follow FFmpeg's distribution checklist, including:
 
 - use dynamic linking
 - provide the corresponding FFmpeg source code for the binaries you distribute
@@ -46,3 +51,4 @@ Official FFmpeg legal page:
 - NVIDIA RTX Video SDK: proprietary, separate license
 - FFmpeg: separate license, often LGPL but depends on the exact build
 - Distributed app packages: may contain components under multiple licenses at the same time
+- The package-level terms shown by the installer are in `DISTRIBUTION_TERMS.txt`

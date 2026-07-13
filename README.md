@@ -6,7 +6,10 @@
 
 - 安装版：[RTX.Video.Converter_1.0.0_x64-setup.exe](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-setup.exe)
 - 便携版：[RTX.Video.Converter_1.0.0_x64-portable.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-portable.zip)
+- FFmpeg 完整对应源码与构建配置：[RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip)
 - 校验文件：[SHA256SUMS.txt](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/SHA256SUMS.txt)
+
+安装版与便携版包含动态链接的 FFmpeg LGPL 共享库以及受 NVIDIA 独立条款约束的 RTX Video SDK 材料。安装、使用或再分发前请阅读包内 `DISTRIBUTION_TERMS.txt`；本项目 MIT 许可证不覆盖这些第三方组件。
 
 ## 功能
 
@@ -35,7 +38,8 @@
 
 - 仓库自有代码采用 [MIT License](./LICENSE)
 - `NVIDIA RTX Video SDK`、FFmpeg 及其他第三方组件仍然使用各自许可证
-- 具体边界见 [THIRD_PARTY.md](./THIRD_PARTY.md)
+- 安装/分发条款见 [DISTRIBUTION_TERMS.txt](./DISTRIBUTION_TERMS.txt)，具体组件边界见 [THIRD_PARTY.md](./THIRD_PARTY.md)
+- NVIDIA 外部通知、商标批准和编解码专利评估不能由代码自动取得，发布前按 [NVIDIA release checklist](./docs/NVIDIA_RELEASE_CHECKLIST.md) 留存证据
 
 ## 从源码构建
 

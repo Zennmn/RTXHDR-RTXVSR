@@ -1,0 +1,74 @@
+RTX Video Converter 1.0.0 - Distribution Terms and Notices
+============================================================
+
+Please read this document before installing, using, or redistributing this
+package. It explains which terms apply to each part of the package. It is not
+a substitute for the complete license texts shipped beside this file.
+
+1. Application code
+-------------------
+
+Code authored for this project is licensed under the MIT License in
+LICENSE.txt, unless an individual file says otherwise. The MIT License does
+not apply to the third-party components described below.
+
+2. FFmpeg shared libraries
+--------------------------
+
+This package dynamically links to an unmodified, minimal FFmpeg build licensed
+under LGPL-2.1-or-later. The full LGPL text is in
+FFMPEG_LICENSE_LGPLv2.1.txt. Users may replace the FFmpeg DLLs in the runtime
+directory with ABI-compatible modified builds.
+
+Exact FFmpeg revision:
+  a09be9b91e8e1219f297586873b0d7322b47df96
+
+Exact nv-codec-headers revision:
+  15ee32753c92faddbabbff11676779618fc6db7e
+
+The complete corresponding source, build configuration, and reproducible
+Docker build recipe are published beside the binaries at:
+
+  https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip
+
+FFmpeg source and licensing information:
+  https://ffmpeg.org/
+  https://www.ffmpeg.org/legal.html
+
+nv-codec-headers carries the MIT notice reproduced in
+NV_CODEC_HEADERS_LICENSE.txt.
+
+3. NVIDIA RTX Video SDK materials
+---------------------------------
+
+The package incorporates object code and runtime materials from the NVIDIA
+RTX Video SDK. Those materials are proprietary NVIDIA software and are not
+licensed under this project's MIT License. The complete applicable NVIDIA SDK
+license is included as NVIDIA_RTX_Video_SDK_License.pdf. NVIDIA components may
+only be used and redistributed as permitted by that license; they may not be
+extracted and redistributed as a standalone SDK.
+
+Restrictions in the NVIDIA SDK license apply only to NVIDIA SDK materials.
+They do not restrict rights granted for FFmpeg under the LGPL or for project
+code under MIT.
+
+NVIDIA, GeForce, GeForce RTX, and NVIDIA RTX are trademarks and/or registered
+trademarks of NVIDIA Corporation in the United States and other countries.
+This independent project is not sponsored by, endorsed by, or affiliated with
+NVIDIA Corporation.
+
+4. Codec patent notice
+----------------------
+
+Neither this package nor the NVIDIA RTX Video SDK license grants patent rights
+for H.264/AVC, H.265/HEVC, AV1, or other audio/video codecs. Distributors and
+users are responsible for determining whether separate patent licenses are
+required for their territory, use case, and distribution model.
+
+5. Other components
+-------------------
+
+Windows App SDK, CommunityToolkit.Mvvm, Microsoft.Extensions.DependencyInjection,
+cpp-httplib, nlohmann/json, GoogleTest, and other build/runtime dependencies
+remain under their respective licenses. See THIRD_PARTY.md for the component
+inventory and source references.

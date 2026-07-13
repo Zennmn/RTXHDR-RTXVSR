@@ -89,10 +89,20 @@
             <Border Style="{StaticResource PanelStyle}" Translation="0,0,8">
                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
                     <Image Width="52" Height="52" Source="Assets/app-icon.png" Stretch="Uniform" />
-                    <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
                         <TextBlock Text="RTX Video Converter" FontWeight="SemiBold" FontSize="16" />
                         <TextBlock Text="版本 1.0.0" Style="{StaticResource SecondaryTextStyle}" />
                         <TextBlock Text="WinUI 3 · Windows App SDK · 原生 RTX 视频增强前端" Style="{StaticResource SecondaryTextStyle}" />
+                        <TextBlock
+                            Text="项目代码、FFmpeg（LGPL-2.1-or-later）和 NVIDIA RTX Video SDK 材料分别适用各自许可。"
+                            Style="{StaticResource SecondaryTextStyle}"
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="查看分发条款" Click="OpenDistributionTerms_Click" />
+                            <HyperlinkButton
+                                Content="FFmpeg 对应源码"
+                                NavigateUri="https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
