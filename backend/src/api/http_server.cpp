@@ -105,7 +105,7 @@ void HttpServer::bind_routes() {
         if (!authorize_request(request, response, options_)) {
             return;
         }
-        nlohmann::json body{{"version", "0.1.1"}, {"ready", true}};
+        nlohmann::json body{{"version", VSR_APP_VERSION}, {"ready", true}};
         set_json(response, body);
     });
 

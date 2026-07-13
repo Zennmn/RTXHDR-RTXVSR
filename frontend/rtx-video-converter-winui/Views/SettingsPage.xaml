@@ -91,6 +91,7 @@
                     <Image Width="52" Height="52" Source="Assets/app-icon.png" Stretch="Uniform" />
                     <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
                         <TextBlock Text="RTX Video Converter" FontWeight="SemiBold" FontSize="16" />
+                        <TextBlock Text="版本 1.0.0" Style="{StaticResource SecondaryTextStyle}" />
                         <TextBlock Text="WinUI 3 · Windows App SDK · 原生 RTX 视频增强前端" Style="{StaticResource SecondaryTextStyle}" />
                     </StackPanel>
                 </Grid>

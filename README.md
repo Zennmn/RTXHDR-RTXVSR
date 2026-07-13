@@ -4,7 +4,9 @@
 
 ## 下载
 
-当前 WinUI 3 重构版请按下方步骤从源码构建。历史 Releases 中的旧架构安装包不代表当前代码。
+- 安装版：[RTX.Video.Converter_1.0.0_x64-setup.exe](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-setup.exe)
+- 便携版：[RTX.Video.Converter_1.0.0_x64-portable.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-portable.zip)
+- 校验文件：[SHA256SUMS.txt](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/SHA256SUMS.txt)
 
 ## 功能
 
@@ -65,6 +67,9 @@ cmake --build build\backend-hw --target vsr_backend --config Release
 
 # 同时生成自包含 WinUI 发布目录，并装配指定硬件后端
 .\build-winui.ps1 -Publish -BackendExe .\build\backend-hw\Release\vsr_backend.exe
+
+# 从上述发布目录生成便携版与 Inno Setup 安装版
+.\package-release.ps1 -Version 1.0.0
 ```
 
 
