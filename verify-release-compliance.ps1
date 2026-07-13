@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PublishDirectory,
     [string]$FfmpegArtifactRoot = "",
+    [string]$ThirdPartyNoticesDirectory = "",
     [string]$Version = "1.0.0"
 )
 
@@ -13,8 +14,12 @@ $nvCodecHeadersCommit = "15ee32753c92faddbabbff11676779618fc6db7e"
 if ([string]::IsNullOrWhiteSpace($FfmpegArtifactRoot)) {
     $FfmpegArtifactRoot = Join-Path $root "artifacts\ffmpeg-minimal"
 }
+if ([string]::IsNullOrWhiteSpace($ThirdPartyNoticesDirectory)) {
+    $ThirdPartyNoticesDirectory = Join-Path $root "artifacts\third-party-notices"
+}
 $PublishDirectory = [System.IO.Path]::GetFullPath($PublishDirectory)
 $FfmpegArtifactRoot = [System.IO.Path]::GetFullPath($FfmpegArtifactRoot)
+$ThirdPartyNoticesDirectory = [System.IO.Path]::GetFullPath($ThirdPartyNoticesDirectory)
 
 function Assert-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -45,6 +50,50 @@ foreach ($relative in @(
 }
 foreach ($license in @("FFMPEG_LICENSE_LGPLv2.1.txt", "NV_CODEC_HEADERS_LICENSE.txt")) {
     Assert-File (Join-Path $runtimeDirectory $license)
+}
+
+$thirdPartyIndex = Join-Path $ThirdPartyNoticesDirectory "THIRD_PARTY_NOTICES.txt"
+Assert-File $thirdPartyIndex
+$thirdPartyIndexText = Get-Content -LiteralPath $thirdPartyIndex -Raw
+foreach ($component in @(
+    "cpp-httplib 0.15.3",
+    "nlohmann/json 3.11.3",
+    "CommunityToolkit.Mvvm/8.4.0",
+    "Microsoft.Extensions.DependencyInjection/8.0.1",
+    "Microsoft.Extensions.DependencyInjection.Abstractions/8.0.2",
+    "Microsoft.Web.WebView2/1.0.3719.77",
+    "Microsoft.Windows.SDK.BuildTools/10.0.26100.4654",
+    "Microsoft.WindowsAppSDK/2.2.0",
+    "System.Numerics.Tensors/9.0.0",
+    ".NET Runtime 8.0.28"
+)) {
+    if ($thirdPartyIndexText.IndexOf($component, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Third-party notice index does not cover required component: $component"
+    }
+}
+
+$indexLines = Get-Content -LiteralPath $thirdPartyIndex
+$verifiedNoticeFiles = 0
+for ($index = 0; $index -lt $indexLines.Count; $index++) {
+    if (-not $indexLines[$index].StartsWith("File: ", [System.StringComparison]::Ordinal)) {
+        continue
+    }
+    if ($index + 1 -ge $indexLines.Count -or
+        -not $indexLines[$index + 1].StartsWith("SHA256: ", [System.StringComparison]::Ordinal)) {
+        throw "Third-party notice index has an invalid file/hash pair at line $($index + 1)."
+    }
+    $relativePath = $indexLines[$index].Substring(6).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+    $noticePath = Join-Path $ThirdPartyNoticesDirectory $relativePath
+    Assert-File $noticePath
+    $expectedHash = $indexLines[$index + 1].Substring(8).Trim()
+    $actualHash = (Get-FileHash -LiteralPath $noticePath -Algorithm SHA256).Hash
+    if ($actualHash -ne $expectedHash) {
+        throw "Third-party notice hash mismatch: $noticePath"
+    }
+    $verifiedNoticeFiles++
+}
+if ($verifiedNoticeFiles -lt 30) {
+    throw "Third-party notice inventory is unexpectedly small: $verifiedNoticeFiles files"
 }
 
 $configText = Get-Content -LiteralPath $configLog -Raw
@@ -82,5 +131,6 @@ if ($unexpectedFfmpegDlls) {
     FfmpegCommit = $ffmpegCommit
     NvCodecHeadersCommit = $nvCodecHeadersCommit
     PublishedFfmpegDlls = (Get-ChildItem -LiteralPath $runtimeDirectory -Filter "*.dll" -File).Count
+    ThirdPartyNoticeFiles = $verifiedNoticeFiles
     Status = "compliance checks passed"
 }

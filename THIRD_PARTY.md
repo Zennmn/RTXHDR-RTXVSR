@@ -43,7 +43,15 @@ Official FFmpeg legal page:
 
 - WinUI NuGet packages, including Microsoft Windows App SDK, CommunityToolkit.Mvvm, and Microsoft.Extensions.DependencyInjection, remain under their own licenses.
 - CMake-fetched dependencies, including cpp-httplib, nlohmann/json, and GoogleTest, remain under their own licenses.
-- Review the WinUI `.csproj` files, `backend/vcpkg.json`, and the resolved CMake dependency versions when preparing third-party notices for a packaged release.
+- Release packages include `THIRD_PARTY_NOTICES.txt` plus the original,
+  versioned license and notice files in `THIRD_PARTY_LICENSES/` for the .NET
+  Runtime, Windows SDK/App SDK, NuGet runtime graph, cpp-httplib, and
+  nlohmann/json.
+- `generate-third-party-notices.ps1` regenerates the inventory from the NuGet
+  lock file, restored packages, configured CMake dependencies, published .NET
+  runtime, and installed Windows SDK. The release compliance check verifies
+  every listed file against its SHA-256 value.
+- GoogleTest is a test-only dependency and is not distributed in the release.
 
 ## Practical Summary
 

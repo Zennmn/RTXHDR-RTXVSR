@@ -3,6 +3,8 @@ param(
     [string]$Version = "1.0.0",
     [string]$PublishDirectory = "",
     [string]$FfmpegArtifactRoot = "",
+    [string]$ThirdPartyNoticesDirectory = "",
+    [string]$ThirdPartyBackendBuildDirectory = "",
     [string]$InnoCompiler = ""
 )
 
@@ -26,10 +28,25 @@ if ([string]::IsNullOrWhiteSpace($FfmpegArtifactRoot)) {
     $FfmpegArtifactRoot = Join-Path $root "artifacts\ffmpeg-minimal"
 }
 $FfmpegArtifactRoot = [System.IO.Path]::GetFullPath($FfmpegArtifactRoot)
+if ([string]::IsNullOrWhiteSpace($ThirdPartyNoticesDirectory)) {
+    $ThirdPartyNoticesDirectory = Join-Path $root "artifacts\third-party-notices"
+}
+$ThirdPartyNoticesDirectory = [System.IO.Path]::GetFullPath($ThirdPartyNoticesDirectory)
+
+$noticeArguments = @{
+    OutputDirectory = $ThirdPartyNoticesDirectory
+    ProjectAssetsFile = Join-Path $root "frontend\rtx-video-converter-winui\obj\project.assets.json"
+    PublishDirectory = $PublishDirectory
+}
+if (-not [string]::IsNullOrWhiteSpace($ThirdPartyBackendBuildDirectory)) {
+    $noticeArguments.BackendBuildDirectory = $ThirdPartyBackendBuildDirectory
+}
+& (Join-Path $root "generate-third-party-notices.ps1") @noticeArguments
 
 & (Join-Path $root "verify-release-compliance.ps1") `
     -PublishDirectory $PublishDirectory `
     -FfmpegArtifactRoot $FfmpegArtifactRoot `
+    -ThirdPartyNoticesDirectory $ThirdPartyNoticesDirectory `
     -Version $Version
 
 $requiredPublishFiles = @(
@@ -71,6 +88,8 @@ foreach ($unwanted in @("qa", "startup-error.txt")) {
 Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination (Join-Path $payloadDirectory "LICENSE.txt")
 Copy-Item -LiteralPath (Join-Path $root "DISTRIBUTION_TERMS.txt") -Destination $payloadDirectory
 Copy-Item -LiteralPath (Join-Path $root "THIRD_PARTY.md") -Destination $payloadDirectory
+Copy-Item -LiteralPath (Join-Path $ThirdPartyNoticesDirectory "THIRD_PARTY_NOTICES.txt") -Destination $payloadDirectory
+Copy-Item -LiteralPath (Join-Path $ThirdPartyNoticesDirectory "THIRD_PARTY_LICENSES") -Destination $payloadDirectory -Recurse
 Copy-Item -LiteralPath (Join-Path $FfmpegArtifactRoot "runtime\FFMPEG_LICENSE_LGPLv2.1.txt") -Destination $payloadDirectory
 Copy-Item -LiteralPath (Join-Path $FfmpegArtifactRoot "runtime\NV_CODEC_HEADERS_LICENSE.txt") -Destination $payloadDirectory
 Copy-Item -LiteralPath (Join-Path $root "RTX_Video_SDK_v1.1.0\NVIDIA_RTX_Video_SDK_License.pdf") -Destination $payloadDirectory

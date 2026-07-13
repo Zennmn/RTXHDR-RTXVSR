@@ -68,7 +68,9 @@ required for their territory, use case, and distribution model.
 5. Other components
 -------------------
 
-Windows App SDK, CommunityToolkit.Mvvm, Microsoft.Extensions.DependencyInjection,
-cpp-httplib, nlohmann/json, GoogleTest, and other build/runtime dependencies
-remain under their respective licenses. See THIRD_PARTY.md for the component
-inventory and source references.
+Windows App SDK, .NET Runtime, CommunityToolkit.Mvvm,
+Microsoft.Extensions.DependencyInjection, cpp-httplib, nlohmann/json, and
+other build/runtime dependencies remain under their respective licenses. See
+THIRD_PARTY_NOTICES.txt and the original files in THIRD_PARTY_LICENSES for the
+exact versioned inventory, copyright notices, and license terms. GoogleTest is
+used only for tests and is not included in the release package.
