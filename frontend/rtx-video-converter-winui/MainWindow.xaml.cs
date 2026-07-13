@@ -46,6 +46,7 @@ public sealed partial class MainWindow : Window
         themeService.InitializeRoot();
 
         SystemBackdrop = new MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.Base };
+        ConfigureAppIcon();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         ConfigureWindow();
@@ -61,6 +62,18 @@ public sealed partial class MainWindow : Window
     {
         AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+    }
+
+    private void ConfigureAppIcon()
+    {
+        var iconPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "Assets",
+            "app-icon-rounded-v100.ico");
+        if (File.Exists(iconPath))
+        {
+            AppWindow.SetIcon(iconPath);
+        }
     }
 
     private void ConfigureWindow()
