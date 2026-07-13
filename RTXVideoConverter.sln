@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTXVideoConverter.Core", "frontend\rtx-video-converter-winui-core\RTXVideoConverter.Core.csproj", "{A6D0A95F-F514-4B83-91DB-F8AD89CC8D01}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTXVideoConverter.Core.Tests", "frontend\rtx-video-converter-winui-core-tests\RTXVideoConverter.Core.Tests.csproj", "{8D36EA9A-EB2A-454C-BB8D-E162A2504B75}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTXVideoConverter.WinUI", "frontend\rtx-video-converter-winui\RTXVideoConverter.WinUI.csproj", "{C430B39C-78C6-4FB0-81AE-362E20751FF1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A6D0A95F-F514-4B83-91DB-F8AD89CC8D01}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A6D0A95F-F514-4B83-91DB-F8AD89CC8D01}.Debug|x64.Build.0 = Debug|Any CPU
+		{A6D0A95F-F514-4B83-91DB-F8AD89CC8D01}.Release|x64.ActiveCfg = Release|Any CPU
+		{A6D0A95F-F514-4B83-91DB-F8AD89CC8D01}.Release|x64.Build.0 = Release|Any CPU
+		{8D36EA9A-EB2A-454C-BB8D-E162A2504B75}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8D36EA9A-EB2A-454C-BB8D-E162A2504B75}.Debug|x64.Build.0 = Debug|Any CPU
+		{8D36EA9A-EB2A-454C-BB8D-E162A2504B75}.Release|x64.ActiveCfg = Release|Any CPU
+		{8D36EA9A-EB2A-454C-BB8D-E162A2504B75}.Release|x64.Build.0 = Release|Any CPU
+		{C430B39C-78C6-4FB0-81AE-362E20751FF1}.Debug|x64.ActiveCfg = Debug|x64
+		{C430B39C-78C6-4FB0-81AE-362E20751FF1}.Debug|x64.Build.0 = Debug|x64
+		{C430B39C-78C6-4FB0-81AE-362E20751FF1}.Release|x64.ActiveCfg = Release|x64
+		{C430B39C-78C6-4FB0-81AE-362E20751FF1}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal

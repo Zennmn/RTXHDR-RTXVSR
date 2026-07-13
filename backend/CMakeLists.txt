@@ -6,7 +6,7 @@ if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
 endif()
 
-project(rtx_video_backend LANGUAGES CXX)
+project(rtx_video_backend VERSION 1.0.0 LANGUAGES CXX)
 
 option(VSR_ENABLE_TESTS "Build unit tests" ON)
 option(VSR_ENABLE_FFMPEG "Build FFmpeg transcode pipeline" OFF)
@@ -61,7 +61,11 @@ endfunction()
 
 add_library(vsr_backend_core STATIC src/core/build_anchor.cpp)
 target_include_directories(vsr_backend_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_definitions(vsr_backend_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(vsr_backend_core PUBLIC
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
+  VSR_APP_VERSION="${PROJECT_VERSION}"
+)
 target_compile_features(vsr_backend_core PUBLIC cxx_std_20)
 
 set(_vsr_core_sources

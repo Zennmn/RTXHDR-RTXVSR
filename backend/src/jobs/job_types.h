@@ -163,8 +163,9 @@ inline Result<void> validate_request(const TranscodeRequest& request) {
     if (request.output.container != "mp4") {
         return Result<void>::Fail({"unsupported_container", "The first backend release writes MP4 output.", request.output.container});
     }
-    if (request.output.video_codec != "h264" && request.output.video_codec != "hevc") {
-        return Result<void>::Fail({"unsupported_video_codec", "Use h264 or hevc for MP4 output.", request.output.video_codec});
+    if (request.output.video_codec != "h264" && request.output.video_codec != "hevc" &&
+        request.output.video_codec != "av1") {
+        return Result<void>::Fail({"unsupported_video_codec", "Use h264, hevc, or av1 for MP4 output.", request.output.video_codec});
     }
     if (request.output.audio_mode != "copy" && request.output.audio_mode != "none") {
         return Result<void>::Fail({"unsupported_audio_mode", "Use copy or none for audioMode.", request.output.audio_mode});
@@ -178,8 +179,25 @@ inline Result<void> validate_request(const TranscodeRequest& request) {
     if (request.processing.vsr.enabled && (request.processing.vsr.scale < 1.0 || request.processing.vsr.scale > 4.0)) {
         return Result<void>::Fail({"invalid_vsr_scale", "VSR scale must be between 1.0 and 4.0.", std::to_string(request.processing.vsr.scale)});
     }
-    if (request.processing.hdr.enabled && request.output.video_codec != "hevc") {
-        return Result<void>::Fail({"hdr_requires_hevc", "HDR output uses HEVC Main10 in the first backend release.", request.output.video_codec});
+    if (request.processing.hdr.enabled && request.output.video_codec != "hevc" &&
+        request.output.video_codec != "av1") {
+        return Result<void>::Fail({"hdr_requires_10bit_codec", "HDR output requires HEVC Main10 or AV1 10-bit.", request.output.video_codec});
+    }
+    if (request.processing.hdr.enabled &&
+        (request.processing.hdr.contrast < 0 || request.processing.hdr.contrast > 200)) {
+        return Result<void>::Fail({"invalid_hdr_contrast", "HDR contrast must be between 0 and 200.", std::to_string(request.processing.hdr.contrast)});
+    }
+    if (request.processing.hdr.enabled &&
+        (request.processing.hdr.saturation < 0 || request.processing.hdr.saturation > 200)) {
+        return Result<void>::Fail({"invalid_hdr_saturation", "HDR saturation must be between 0 and 200.", std::to_string(request.processing.hdr.saturation)});
+    }
+    if (request.processing.hdr.enabled &&
+        (request.processing.hdr.middle_gray < 10 || request.processing.hdr.middle_gray > 100)) {
+        return Result<void>::Fail({"invalid_hdr_middle_gray", "HDR middle gray must be between 10 and 100.", std::to_string(request.processing.hdr.middle_gray)});
+    }
+    if (request.processing.hdr.enabled &&
+        (request.processing.hdr.max_luminance < 400 || request.processing.hdr.max_luminance > 2000)) {
+        return Result<void>::Fail({"invalid_hdr_max_luminance", "HDR max luminance must be between 400 and 2000.", std::to_string(request.processing.hdr.max_luminance)});
     }
     return Result<void>::Ok();
 }

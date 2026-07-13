@@ -36,8 +36,9 @@ Official FFmpeg legal page:
 
 ## Other Dependencies
 
-- Frontend npm packages, Rust crates, and other fetched build dependencies remain under their own licenses.
-- Review `frontend/rtx-video-converter/package.json`, `frontend/rtx-video-converter/package-lock.json`, and `frontend/rtx-video-converter/src-tauri/Cargo.lock` when preparing third-party notices for a packaged release.
+- WinUI NuGet packages, including Microsoft Windows App SDK, CommunityToolkit.Mvvm, and Microsoft.Extensions.DependencyInjection, remain under their own licenses.
+- CMake-fetched dependencies, including cpp-httplib, nlohmann/json, and GoogleTest, remain under their own licenses.
+- Review the WinUI `.csproj` files, `backend/vcpkg.json`, and the resolved CMake dependency versions when preparing third-party notices for a packaged release.
 
 ## Practical Summary
 

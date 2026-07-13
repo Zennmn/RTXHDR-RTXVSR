@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -140,6 +141,14 @@ Result<void> set_required_encoder_option_double(AVCodecContext* context, const c
     return Result<void>::Ok();
 }
 
+Result<void> set_required_encoder_option_int(AVCodecContext* context, const char* name, std::int64_t value) {
+    const int result = av_opt_set_int(context->priv_data, name, value, 0);
+    if (result < 0) {
+        return Result<void>::Fail(ffmpeg_error("encoder_option_failed", "FFmpeg could not set a required NVENC option.", result));
+    }
+    return Result<void>::Ok();
+}
+
 void set_optional_encoder_option_int(AVCodecContext* context, const char* name, std::int64_t value) {
     const int result = av_opt_set_int(context->priv_data, name, value, 0);
     if (result < 0) {
@@ -147,7 +156,7 @@ void set_optional_encoder_option_int(AVCodecContext* context, const char* name, 
     }
 }
 
-Result<void> configure_nvenc_quality(AVCodecContext* context) {
+Result<void> configure_nvenc_quality(AVCodecContext* context, bool enable_split_encode) {
     for (const auto& option : {
              std::pair<const char*, const char*>{"preset", "p7"},
              std::pair<const char*, const char*>{"tune", "hq"},
@@ -164,11 +173,24 @@ Result<void> configure_nvenc_quality(AVCodecContext* context) {
         return cq;
     }
 
-    set_optional_encoder_option_int(context, "spatial_aq", 1);
-    set_optional_encoder_option_int(context, "temporal_aq", 1);
-    set_optional_encoder_option_int(context, "aq-strength", 8);
-    set_optional_encoder_option_int(context, "rc-lookahead", 32);
-    set_optional_encoder_option_int(context, "multipass", 2);
+    for (const auto& option : {
+             std::pair<const char*, std::int64_t>{"spatial-aq", 1},
+             std::pair<const char*, std::int64_t>{"temporal-aq", 1},
+             std::pair<const char*, std::int64_t>{"aq-strength", 8},
+             std::pair<const char*, std::int64_t>{"rc-lookahead", 32},
+             std::pair<const char*, std::int64_t>{"multipass", 2},
+         }) {
+        const auto configured = set_required_encoder_option_int(context, option.first, option.second);
+        if (!configured.ok()) {
+            return configured;
+        }
+    }
+    if (enable_split_encode) {
+        // On GPUs with multiple NVENC engines, encode horizontal strips concurrently.
+        // This keeps the existing P7/HQ, AQ, lookahead and full-resolution multipass
+        // quality configuration; single-engine GPUs are handled by the driver.
+        set_optional_encoder_option_int(context, "split_encode_mode", 1);
+    }
     return Result<void>::Ok();
 }
 
@@ -353,12 +375,16 @@ Result<BufferRefPtr> create_ffmpeg_d3d11_device(ID3D11Device* device, ID3D11Devi
     return Result<BufferRefPtr>::Ok(std::move(device_ref));
 }
 
+DXGI_FORMAT dxgi_format_for_rtx_surface(bool hdr_enabled) {
+    return hdr_enabled ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+}
+
 DXGI_FORMAT dxgi_format_for_encoder_surface(AVPixelFormat format) {
     switch (format) {
-    case AV_PIX_FMT_BGRA:
-        return DXGI_FORMAT_B8G8R8A8_UNORM;
-    case AV_PIX_FMT_X2BGR10:
-        return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case AV_PIX_FMT_NV12:
+        return DXGI_FORMAT_NV12;
+    case AV_PIX_FMT_P010LE:
+        return DXGI_FORMAT_P010;
     default:
         return DXGI_FORMAT_UNKNOWN;
     }
@@ -382,7 +408,25 @@ DXGI_COLOR_SPACE_TYPE d3d11_input_color_space(const AVCodecContext* decoder) {
 DXGI_COLOR_SPACE_TYPE d3d11_rtx_input_color_space(const AVCodecContext* decoder) {
     const bool bt2020 = decoder != nullptr &&
         (decoder->colorspace == AVCOL_SPC_BT2020_NCL || decoder->color_primaries == AVCOL_PRI_BT2020);
+    const bool pq = decoder != nullptr && decoder->color_trc == AVCOL_TRC_SMPTE2084;
+    if (bt2020 && pq) {
+        return DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+    }
     return bt2020 ? DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+}
+
+DXGI_COLOR_SPACE_TYPE d3d11_encoder_output_color_space(const AVCodecContext* encoder) {
+    const bool full_range = encoder != nullptr && encoder->color_range == AVCOL_RANGE_JPEG;
+    const bool bt2020 = encoder != nullptr &&
+        (encoder->colorspace == AVCOL_SPC_BT2020_NCL || encoder->color_primaries == AVCOL_PRI_BT2020);
+    const bool pq = encoder != nullptr && encoder->color_trc == AVCOL_TRC_SMPTE2084;
+    if (bt2020 && pq) {
+        return DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020;
+    }
+    if (bt2020) {
+        return full_range ? DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020 : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020;
+    }
+    return full_range ? DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709 : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709;
 }
 
 Result<void> create_texture(
@@ -412,169 +456,174 @@ Result<void> create_texture(
     return Result<void>::Ok();
 }
 
-Result<void> convert_texture_with_video_processor(
-    ID3D11Device* device,
-    ID3D11DeviceContext* context,
-    ID3D11Texture2D* input,
-    UINT input_slice,
-    ID3D11Texture2D* output,
-    UINT output_slice,
-    int input_width,
-    int input_height,
-    int output_width,
-    int output_height,
-    DXGI_COLOR_SPACE_TYPE input_color_space,
-    DXGI_COLOR_SPACE_TYPE output_color_space) {
-    Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device;
-    HRESULT result = device->QueryInterface(IID_PPV_ARGS(video_device.GetAddressOf()));
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_device_required",
-            "The D3D11 device does not expose video processing support.",
-            result));
+class D3d11VideoConverter {
+public:
+    Result<void> initialize(
+        ID3D11Device* device,
+        ID3D11DeviceContext* context,
+        ID3D11Texture2D* input,
+        ID3D11Texture2D* output,
+        int input_width,
+        int input_height,
+        int output_width,
+        int output_height,
+        DXGI_COLOR_SPACE_TYPE input_color_space,
+        DXGI_COLOR_SPACE_TYPE output_color_space) {
+        HRESULT result = device->QueryInterface(IID_PPV_ARGS(video_device_.GetAddressOf()));
+        if (FAILED(result)) {
+            return Result<void>::Fail(hresult_error("d3d11_video_device_required", "The D3D11 device does not expose video processing support.", result));
+        }
+        result = context->QueryInterface(IID_PPV_ARGS(video_context_.GetAddressOf()));
+        if (FAILED(result)) {
+            return Result<void>::Fail(hresult_error("d3d11_video_context_required", "The D3D11 immediate context does not expose video processing support.", result));
+        }
+
+        D3D11_TEXTURE2D_DESC input_desc = {};
+        D3D11_TEXTURE2D_DESC output_desc = {};
+        input->GetDesc(&input_desc);
+        output->GetDesc(&output_desc);
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC content_desc = {};
+        content_desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+        content_desc.InputWidth = static_cast<UINT>(input_width);
+        content_desc.InputHeight = static_cast<UINT>(input_height);
+        content_desc.OutputWidth = static_cast<UINT>(output_width);
+        content_desc.OutputHeight = static_cast<UINT>(output_height);
+        content_desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+        result = video_device_->CreateVideoProcessorEnumerator(&content_desc, enumerator_.GetAddressOf());
+        if (FAILED(result)) {
+            return Result<void>::Fail(hresult_error("d3d11_video_processor_enumerator_failed", "D3D11 video processor enumeration failed.", result));
+        }
+
+        UINT format_flags = 0;
+        result = enumerator_->CheckVideoProcessorFormat(input_desc.Format, &format_flags);
+        if (FAILED(result) || (format_flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) == 0) {
+            return Result<void>::Fail(hresult_error("d3d11_video_processor_input_format_unsupported", "The D3D11 video processor cannot use the decoded frame format as input.", FAILED(result) ? result : E_INVALIDARG));
+        }
+        format_flags = 0;
+        result = enumerator_->CheckVideoProcessorFormat(output_desc.Format, &format_flags);
+        if (FAILED(result) || (format_flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT) == 0) {
+            return Result<void>::Fail(hresult_error("d3d11_video_processor_output_format_unsupported", "The D3D11 video processor cannot write the RTX texture format.", FAILED(result) ? result : E_INVALIDARG));
+        }
+        result = video_device_->CreateVideoProcessor(enumerator_.Get(), 0, processor_.GetAddressOf());
+        if (FAILED(result)) {
+            return Result<void>::Fail(hresult_error("d3d11_video_processor_create_failed", "D3D11 video processor creation failed.", result));
+        }
+
+        RECT output_rect = {0, 0, static_cast<LONG>(output_width), static_cast<LONG>(output_height)};
+        video_context_->VideoProcessorSetStreamFrameFormat(processor_.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+        video_context_->VideoProcessorSetStreamOutputRate(processor_.Get(), 0, D3D11_VIDEO_PROCESSOR_OUTPUT_RATE_NORMAL, TRUE, nullptr);
+        video_context_->VideoProcessorSetStreamSourceRect(processor_.Get(), 0, FALSE, nullptr);
+        video_context_->VideoProcessorSetStreamDestRect(processor_.Get(), 0, TRUE, &output_rect);
+        video_context_->VideoProcessorSetOutputTargetRect(processor_.Get(), TRUE, &output_rect);
+        Microsoft::WRL::ComPtr<ID3D11VideoContext1> video_context1;
+        if (SUCCEEDED(context->QueryInterface(IID_PPV_ARGS(video_context1.GetAddressOf())))) {
+            video_context1->VideoProcessorSetStreamColorSpace1(processor_.Get(), 0, input_color_space);
+            video_context1->VideoProcessorSetOutputColorSpace1(processor_.Get(), output_color_space);
+        }
+
+        return Result<void>::Ok();
     }
 
-    Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context;
-    result = context->QueryInterface(IID_PPV_ARGS(video_context.GetAddressOf()));
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_context_required",
-            "The D3D11 immediate context does not expose video processing support.",
-            result));
+    Result<void> convert(ID3D11Texture2D* input, UINT input_slice, ID3D11Texture2D* output, UINT output_slice) {
+        ID3D11VideoProcessorInputView* input_view = nullptr;
+        for (auto& cached : input_views_) {
+            if (cached.texture.Get() == input && cached.slice == input_slice) {
+                input_view = cached.view.Get();
+                break;
+            }
+        }
+        if (input_view == nullptr) {
+            D3D11_TEXTURE2D_DESC input_desc = {};
+            input->GetDesc(&input_desc);
+            if (input_slice >= input_desc.ArraySize) {
+                return Result<void>::Fail({"d3d11_input_slice_invalid", "The D3D11 texture slice is out of range.", std::to_string(input_slice)});
+            }
+            D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input_view_desc = {};
+            input_view_desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+            input_view_desc.Texture2D.MipSlice = 0;
+            input_view_desc.Texture2D.ArraySlice = input_slice;
+            CachedInputView cached;
+            cached.texture = input;
+            cached.slice = input_slice;
+            const HRESULT result = video_device_->CreateVideoProcessorInputView(
+                input,
+                enumerator_.Get(),
+                &input_view_desc,
+                cached.view.GetAddressOf());
+            if (FAILED(result)) {
+                return Result<void>::Fail(hresult_error("d3d11_video_processor_input_view_failed", "D3D11 video processor input view creation failed.", result));
+            }
+            input_views_.push_back(std::move(cached));
+            input_view = input_views_.back().view.Get();
+        }
+        ID3D11VideoProcessorOutputView* output_view = nullptr;
+        for (auto& cached : output_views_) {
+            if (cached.texture.Get() == output && cached.slice == output_slice) {
+                output_view = cached.view.Get();
+                break;
+            }
+        }
+        if (output_view == nullptr) {
+            D3D11_TEXTURE2D_DESC output_desc = {};
+            output->GetDesc(&output_desc);
+            D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC output_view_desc = {};
+            if (output_desc.ArraySize > 1) {
+                output_view_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2DARRAY;
+                output_view_desc.Texture2DArray.MipSlice = 0;
+                output_view_desc.Texture2DArray.FirstArraySlice = output_slice;
+                output_view_desc.Texture2DArray.ArraySize = 1;
+            } else {
+                output_view_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+                output_view_desc.Texture2D.MipSlice = 0;
+            }
+            CachedOutputView cached;
+            cached.texture = output;
+            cached.slice = output_slice;
+            const HRESULT result = video_device_->CreateVideoProcessorOutputView(
+                output,
+                enumerator_.Get(),
+                &output_view_desc,
+                cached.view.GetAddressOf());
+            if (FAILED(result)) {
+                return Result<void>::Fail(hresult_error("d3d11_video_processor_output_view_failed", "D3D11 video processor output view creation failed.", result));
+            }
+            output_views_.push_back(std::move(cached));
+            output_view = output_views_.back().view.Get();
+        }
+
+        D3D11_VIDEO_PROCESSOR_STREAM stream = {};
+        stream.Enable = TRUE;
+        stream.pInputSurface = input_view;
+        const HRESULT result = video_context_->VideoProcessorBlt(processor_.Get(), output_view, 0, 1, &stream);
+        if (FAILED(result)) {
+            return Result<void>::Fail(hresult_error("d3d11_video_processor_blt_failed", "D3D11 video processor conversion failed.", result));
+        }
+        // Do not Flush here. The conversion and the following NGX evaluation use
+        // the same immediate context, so D3D11 command ordering already preserves
+        // the dependency while allowing the driver to batch submissions.
+        return Result<void>::Ok();
     }
 
-    D3D11_TEXTURE2D_DESC input_desc = {};
-    D3D11_TEXTURE2D_DESC output_desc = {};
-    input->GetDesc(&input_desc);
-    output->GetDesc(&output_desc);
+private:
+    struct CachedInputView {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        UINT slice = 0;
+        Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> view;
+    };
 
-    D3D11_VIDEO_PROCESSOR_CONTENT_DESC content_desc = {};
-    content_desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    content_desc.InputWidth = static_cast<UINT>(input_width);
-    content_desc.InputHeight = static_cast<UINT>(input_height);
-    content_desc.OutputWidth = static_cast<UINT>(output_width);
-    content_desc.OutputHeight = static_cast<UINT>(output_height);
-    content_desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+    struct CachedOutputView {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        UINT slice = 0;
+        Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> view;
+    };
 
-    Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> enumerator;
-    result = video_device->CreateVideoProcessorEnumerator(&content_desc, enumerator.GetAddressOf());
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_enumerator_failed",
-            "D3D11 video processor enumeration failed.",
-            result));
-    }
-
-    UINT format_flags = 0;
-    result = enumerator->CheckVideoProcessorFormat(input_desc.Format, &format_flags);
-    if (FAILED(result) || (format_flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) == 0) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_input_format_unsupported",
-            "The D3D11 video processor cannot use the decoded frame format as input.",
-            FAILED(result) ? result : E_INVALIDARG));
-    }
-
-    format_flags = 0;
-    result = enumerator->CheckVideoProcessorFormat(output_desc.Format, &format_flags);
-    if (FAILED(result) || (format_flags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT) == 0) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_output_format_unsupported",
-            "The D3D11 video processor cannot write the RTX texture format.",
-            FAILED(result) ? result : E_INVALIDARG));
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor;
-    result = video_device->CreateVideoProcessor(enumerator.Get(), 0, processor.GetAddressOf());
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_create_failed",
-            "D3D11 video processor creation failed.",
-            result));
-    }
-
-    RECT output_rect = {0, 0, static_cast<LONG>(output_width), static_cast<LONG>(output_height)};
-    video_context->VideoProcessorSetStreamFrameFormat(processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
-    video_context->VideoProcessorSetStreamOutputRate(
-        processor.Get(),
-        0,
-        D3D11_VIDEO_PROCESSOR_OUTPUT_RATE_NORMAL,
-        TRUE,
-        nullptr);
-    video_context->VideoProcessorSetStreamSourceRect(processor.Get(), 0, FALSE, nullptr);
-    video_context->VideoProcessorSetStreamDestRect(processor.Get(), 0, TRUE, &output_rect);
-    video_context->VideoProcessorSetOutputTargetRect(processor.Get(), TRUE, &output_rect);
-    Microsoft::WRL::ComPtr<ID3D11VideoContext1> video_context1;
-    if (SUCCEEDED(context->QueryInterface(IID_PPV_ARGS(video_context1.GetAddressOf())))) {
-        video_context1->VideoProcessorSetStreamColorSpace1(processor.Get(), 0, input_color_space);
-        video_context1->VideoProcessorSetOutputColorSpace1(processor.Get(), output_color_space);
-    }
-
-    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC output_view_desc = {};
-    if (output_desc.ArraySize > 1) {
-        output_view_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2DARRAY;
-        output_view_desc.Texture2DArray.MipSlice = 0;
-        output_view_desc.Texture2DArray.FirstArraySlice = output_slice;
-        output_view_desc.Texture2DArray.ArraySize = 1;
-    } else {
-        output_view_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-        output_view_desc.Texture2D.MipSlice = 0;
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> output_view;
-    result = video_device->CreateVideoProcessorOutputView(
-        output,
-        enumerator.Get(),
-        &output_view_desc,
-        output_view.GetAddressOf());
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_output_view_failed",
-            "D3D11 video processor output view creation failed.",
-            result));
-    }
-
-    Microsoft::WRL::ComPtr<ID3D11Resource> input_resource;
-    result = input->QueryInterface(IID_PPV_ARGS(input_resource.GetAddressOf()));
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_input_resource_failed",
-            "The decoded D3D11 texture could not be used as a video processor resource.",
-            result));
-    }
-
-    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input_view_desc = {};
-    input_view_desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
-    input_view_desc.Texture2D.MipSlice = 0;
-    input_view_desc.Texture2D.ArraySlice = input_slice;
-
-    Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input_view;
-    result = video_device->CreateVideoProcessorInputView(
-        input_resource.Get(),
-        enumerator.Get(),
-        &input_view_desc,
-        input_view.GetAddressOf());
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_input_view_failed",
-            "D3D11 video processor input view creation failed.",
-            result));
-    }
-
-    D3D11_VIDEO_PROCESSOR_STREAM stream = {};
-    stream.Enable = TRUE;
-    stream.pInputSurface = input_view.Get();
-
-    result = video_context->VideoProcessorBlt(processor.Get(), output_view.Get(), 0, 1, &stream);
-    if (FAILED(result)) {
-        return Result<void>::Fail(hresult_error(
-            "d3d11_video_processor_blt_failed",
-            "D3D11 video processor conversion failed.",
-            result));
-    }
-
-    context->Flush();
-    return Result<void>::Ok();
-}
+    Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device_;
+    Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context_;
+    Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> enumerator_;
+    Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor_;
+    std::vector<CachedInputView> input_views_;
+    std::vector<CachedOutputView> output_views_;
+};
 
 Result<BufferRefPtr> create_encoder_frames_context(
     AVBufferRef* hw_device_ref,
@@ -595,8 +644,7 @@ Result<BufferRefPtr> create_encoder_frames_context(
     frames->initial_pool_size = 0;
 
     auto* d3d11_frames = reinterpret_cast<AVD3D11VAFramesContext*>(frames->hwctx);
-    d3d11_frames->BindFlags =
-        D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    d3d11_frames->BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
     const int result = av_hwframe_ctx_init(frames_ref.get());
     if (result < 0) {
@@ -609,14 +657,10 @@ Result<BufferRefPtr> create_encoder_frames_context(
     return Result<BufferRefPtr>::Ok(std::move(frames_ref));
 }
 
-Result<void> drain_encoder(AVCodecContext* encoder, AVFormatContext* output, AVStream* stream) {
-    PacketPtr packet(av_packet_alloc());
-    if (!packet) {
-        return Result<void>::Fail({"packet_alloc_failed", "FFmpeg could not allocate an encoder packet.", ""});
-    }
-
+Result<void> drain_encoder(AVCodecContext* encoder, AVFormatContext* output, AVStream* stream, AVPacket* packet) {
     for (;;) {
-        const int result = avcodec_receive_packet(encoder, packet.get());
+        av_packet_unref(packet);
+        const int result = avcodec_receive_packet(encoder, packet);
         if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
             return Result<void>::Ok();
         }
@@ -628,10 +672,9 @@ Result<void> drain_encoder(AVCodecContext* encoder, AVFormatContext* output, AVS
         }
 
         packet->stream_index = stream->index;
-        av_packet_rescale_ts(packet.get(), encoder->time_base, stream->time_base);
+        av_packet_rescale_ts(packet, encoder->time_base, stream->time_base);
 
-        const int write_result = av_interleaved_write_frame(output, packet.get());
-        av_packet_unref(packet.get());
+        const int write_result = av_interleaved_write_frame(output, packet);
         if (write_result < 0) {
             return Result<void>::Fail(ffmpeg_error(
                 "output_packet_write_failed",
@@ -822,7 +865,9 @@ Result<void> FfmpegTranscodePipeline::run(
     OutputFormatContextPtr output(raw_output);
 
     const bool hdr_enabled = request.processing.hdr.enabled;
-    const char* encoder_name = ffmpeg_nvenc_encoder_name(request.output, hdr_enabled);
+    const char* encoder_name = ffmpeg_nvenc_encoder_name(request.output);
+    const bool av1_encoder = std::string_view(encoder_name) == "av1_nvenc";
+    const bool hevc_encoder = std::string_view(encoder_name) == "hevc_nvenc";
     const AVCodec* encoder = avcodec_find_encoder_by_name(encoder_name);
     if (encoder == nullptr) {
         return Result<void>::Fail({
@@ -835,9 +880,10 @@ Result<void> FfmpegTranscodePipeline::run(
     const double scale = request.processing.vsr.enabled ? request.processing.vsr.scale : 1.0;
     const int output_width = even_scaled_dimension(decoder_context->width, scale);
     const int output_height = even_scaled_dimension(decoder_context->height, scale);
-    const AVPixelFormat encoder_sw_format = hdr_enabled ? AV_PIX_FMT_X2BGR10 : AV_PIX_FMT_BGRA;
-    const DXGI_FORMAT rtx_dxgi_format = dxgi_format_for_encoder_surface(encoder_sw_format);
-    if (rtx_dxgi_format == DXGI_FORMAT_UNKNOWN) {
+    const AVPixelFormat encoder_sw_format = hdr_enabled ? AV_PIX_FMT_P010LE : AV_PIX_FMT_NV12;
+    const DXGI_FORMAT encoder_dxgi_format = dxgi_format_for_encoder_surface(encoder_sw_format);
+    const DXGI_FORMAT rtx_dxgi_format = dxgi_format_for_rtx_surface(hdr_enabled);
+    if (encoder_dxgi_format == DXGI_FORMAT_UNKNOWN) {
         return Result<void>::Fail({"encoder_format_unsupported", "The requested encoder texture format is not supported.", ""});
     }
 
@@ -881,25 +927,42 @@ Result<void> FfmpegTranscodePipeline::run(
         encoder_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
     if (hdr_enabled) {
-        encoder_context->profile = 2;
         encoder_context->color_primaries = AVCOL_PRI_BT2020;
         encoder_context->color_trc = AVCOL_TRC_SMPTE2084;
         encoder_context->colorspace = AVCOL_SPC_BT2020_NCL;
         encoder_context->color_range = AVCOL_RANGE_MPEG;
-        av_opt_set(encoder_context->priv_data, "profile", "main10", 0);
-        av_opt_set(encoder_context->priv_data, "tier", "main", 0);
+        if (hevc_encoder) {
+            encoder_context->profile = 2;
+            const auto profile = set_required_encoder_option(encoder_context.get(), "profile", "main10");
+            if (!profile.ok()) {
+                return Result<void>::Fail(profile.error());
+            }
+            const auto tier = set_required_encoder_option(encoder_context.get(), "tier", "main");
+            if (!tier.ok()) {
+                return Result<void>::Fail(tier.error());
+            }
+        } else if (av1_encoder) {
+            encoder_context->profile = AV_PROFILE_AV1_MAIN;
+            const auto high_bit_depth = set_required_encoder_option(encoder_context.get(), "highbitdepth", "1");
+            if (!high_bit_depth.ok()) {
+                return Result<void>::Fail(high_bit_depth.error());
+            }
+        }
     } else {
         encoder_context->color_primaries = decoder_context->color_primaries;
         encoder_context->color_trc = decoder_context->color_trc;
         encoder_context->colorspace = decoder_context->colorspace;
         encoder_context->color_range = decoder_context->color_range;
     }
-    const auto quality_configured = configure_nvenc_quality(encoder_context.get());
+    const auto quality_configured = configure_nvenc_quality(
+        encoder_context.get(),
+        hevc_encoder || av1_encoder);
     if (!quality_configured.ok()) {
         return Result<void>::Fail(quality_configured.error());
     }
     log_info(
-        "NVENC quality configured: target_bitrate=" + std::to_string(target_bit_rate) +
+        "NVENC quality configured: encoder=" + std::string(encoder_name) +
+        ", target_bitrate=" + std::to_string(target_bit_rate) +
         ", maxrate=" + std::to_string(encoder_context->rc_max_rate) +
         ", buffer=" + std::to_string(encoder_context->rc_buffer_size));
 
@@ -1009,25 +1072,61 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     PacketPtr packet(av_packet_alloc());
+    PacketPtr encoder_packet(av_packet_alloc());
     FramePtr decoded_frame(av_frame_alloc());
-    if (!packet || !decoded_frame) {
+    FramePtr encoder_frame(av_frame_alloc());
+    if (!packet || !encoder_packet || !decoded_frame || !encoder_frame) {
         return Result<void>::Fail({"ffmpeg_frame_alloc_failed", "FFmpeg could not allocate decode buffers.", ""});
     }
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> rtx_input_texture;
+    constexpr std::size_t rtx_input_ring_size = 4;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11Texture2D>> rtx_input_textures;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11Texture2D>> rtx_output_textures;
+    D3d11VideoConverter decoder_to_rtx_converter;
+    D3d11VideoConverter rtx_to_encoder_converter;
+    bool decoder_to_rtx_converter_initialized = false;
+    bool rtx_to_encoder_converter_initialized = false;
     std::int64_t frames_done = 0;
+    auto progress_sample_time = std::chrono::steady_clock::now();
+    std::int64_t progress_sample_frames = 0;
+    double smoothed_fps = 0.0;
+    std::int64_t eta_seconds = 0;
     const DXGI_COLOR_SPACE_TYPE video_processor_input_color = d3d11_input_color_space(decoder_context.get());
-    const DXGI_COLOR_SPACE_TYPE video_processor_output_color = d3d11_rtx_input_color_space(decoder_context.get());
+    const DXGI_COLOR_SPACE_TYPE rtx_input_color = d3d11_rtx_input_color_space(decoder_context.get());
+    const DXGI_COLOR_SPACE_TYPE rtx_output_color = hdr_enabled
+        ? DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
+        : d3d11_rtx_input_color_space(decoder_context.get());
+    const DXGI_COLOR_SPACE_TYPE encoder_output_color = d3d11_encoder_output_color_space(encoder_context.get());
 
     auto emit_progress = [&](JobStage stage, std::int64_t done) {
         if (!progress) {
             return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const double sample_seconds = std::chrono::duration<double>(now - progress_sample_time).count();
+        const std::int64_t sample_frames = done - progress_sample_frames;
+        if (sample_frames > 0 && (smoothed_fps <= 0.0 || sample_seconds >= 0.25)) {
+            const auto metrics = ffmpeg_progress_metrics(
+                done,
+                frames_total,
+                sample_frames,
+                sample_seconds,
+                smoothed_fps);
+            smoothed_fps = metrics.fps;
+            eta_seconds = metrics.eta_seconds;
+            progress_sample_time = now;
+            progress_sample_frames = done;
+        } else if (smoothed_fps > 0.0 && frames_total > done) {
+            eta_seconds = static_cast<std::int64_t>(std::ceil(
+                static_cast<double>(frames_total - done) / smoothed_fps));
         }
         JobProgress job_progress;
         job_progress.stage = stage;
         job_progress.progress = progress_from_frames(done, frames_total);
         job_progress.frames_done = done;
         job_progress.frames_total = frames_total;
+        job_progress.fps = smoothed_fps;
+        job_progress.eta_seconds = eta_seconds;
         progress(job_progress);
     };
 
@@ -1046,40 +1145,60 @@ Result<void> FfmpegTranscodePipeline::run(
         auto* decoded_texture = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]);
         const UINT decoded_slice = static_cast<UINT>(reinterpret_cast<intptr_t>(frame->data[1]));
 
-        if (rtx_input_texture == nullptr) {
-            const auto created = create_texture(
+        if (rtx_input_textures.empty()) {
+            rtx_input_textures.resize(rtx_input_ring_size);
+            rtx_output_textures.resize(rtx_input_ring_size);
+            for (std::size_t index = 0; index < rtx_input_ring_size; ++index) {
+                const auto created = create_texture(
+                    d3d11.value().device.Get(),
+                    decoder_context->width,
+                    decoder_context->height,
+                    rtx_dxgi_format,
+                    D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+                    rtx_input_textures[index]);
+                if (!created.ok()) {
+                    return Result<void>::Fail(created.error());
+                }
+                const auto output_created = create_texture(
+                    d3d11.value().device.Get(),
+                    output_width,
+                    output_height,
+                    rtx_dxgi_format,
+                    D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
+                    rtx_output_textures[index]);
+                if (!output_created.ok()) {
+                    return Result<void>::Fail(output_created.error());
+                }
+            }
+            const auto converter_initialized = decoder_to_rtx_converter.initialize(
                 d3d11.value().device.Get(),
+                d3d11.value().context.Get(),
+                decoded_texture,
+                rtx_input_textures.front().Get(),
                 decoder_context->width,
                 decoder_context->height,
-                rtx_dxgi_format,
-                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
-                rtx_input_texture);
-            if (!created.ok()) {
-                return Result<void>::Fail(created.error());
+                decoder_context->width,
+                decoder_context->height,
+                video_processor_input_color,
+                rtx_input_color);
+            if (!converter_initialized.ok()) {
+                return Result<void>::Fail(converter_initialized.error());
             }
+            decoder_to_rtx_converter_initialized = true;
         }
 
-        const auto converted = convert_texture_with_video_processor(
-            d3d11.value().device.Get(),
-            d3d11.value().context.Get(),
-            decoded_texture,
-            decoded_slice,
-            rtx_input_texture.Get(),
-            0,
-            decoder_context->width,
-            decoder_context->height,
-            decoder_context->width,
-            decoder_context->height,
-            video_processor_input_color,
-            video_processor_output_color);
+        if (!decoder_to_rtx_converter_initialized) {
+            return Result<void>::Fail({"d3d11_video_converter_uninitialized", "The D3D11 video converter was not initialized.", ""});
+        }
+        const std::size_t rtx_ring_index = static_cast<std::size_t>(frames_done) % rtx_input_textures.size();
+        auto& rtx_input_texture = rtx_input_textures[rtx_ring_index];
+        auto& rtx_output_texture = rtx_output_textures[rtx_ring_index];
+        const auto converted = decoder_to_rtx_converter.convert(decoded_texture, decoded_slice, rtx_input_texture.Get(), 0);
         if (!converted.ok()) {
             return Result<void>::Fail(converted.error());
         }
 
-        FramePtr encoder_frame(av_frame_alloc());
-        if (!encoder_frame) {
-            return Result<void>::Fail({"encoder_frame_alloc_failed", "FFmpeg could not allocate an encoder frame.", ""});
-        }
+        av_frame_unref(encoder_frame.get());
         result = av_hwframe_get_buffer(encoder_frames.value().get(), encoder_frame.get(), 0);
         if (result < 0) {
             return Result<void>::Fail(ffmpeg_error(
@@ -1093,28 +1212,38 @@ Result<void> FfmpegTranscodePipeline::run(
         if (output_texture == nullptr) {
             return Result<void>::Fail({"encoder_frame_texture_missing", "The D3D11 encoder frame did not expose a texture.", ""});
         }
-        if (output_slice != 0) {
+        D3D11_TEXTURE2D_DESC output_desc = {};
+        output_texture->GetDesc(&output_desc);
+        if (output_desc.Format != encoder_dxgi_format) {
             return Result<void>::Fail({
-                "encoder_array_slice_unsupported",
-                "The RTX processor requires a standalone D3D11 output texture.",
-                "FFmpeg allocated an array-slice encoder frame."
+                "encoder_texture_format_mismatch",
+                "The NVENC D3D11 frame format does not match the requested YUV format.",
+                ""
             });
         }
 
-        D3D11_TEXTURE2D_DESC output_desc = {};
-        output_texture->GetDesc(&output_desc);
-        if (output_desc.Format != rtx_dxgi_format) {
-            return Result<void>::Fail({
-                "encoder_texture_format_mismatch",
-                "The NVENC D3D11 frame format does not match the RTX output format.",
-                ""
-            });
+        if (!rtx_to_encoder_converter_initialized) {
+            const auto converter_initialized = rtx_to_encoder_converter.initialize(
+                d3d11.value().device.Get(),
+                d3d11.value().context.Get(),
+                rtx_output_texture.Get(),
+                output_texture,
+                output_width,
+                output_height,
+                output_width,
+                output_height,
+                rtx_output_color,
+                encoder_output_color);
+            if (!converter_initialized.ok()) {
+                return Result<void>::Fail(converter_initialized.error());
+            }
+            rtx_to_encoder_converter_initialized = true;
         }
 
         emit_progress(JobStage::processing_rtx, frames_done);
         RtxDx11Frame rtx_frame;
         rtx_frame.input = rtx_input_texture.Get();
-        rtx_frame.output = output_texture;
+        rtx_frame.output = rtx_output_texture.Get();
         rtx_frame.input_width = static_cast<std::uint32_t>(decoder_context->width);
         rtx_frame.input_height = static_cast<std::uint32_t>(decoder_context->height);
         rtx_frame.output_width = static_cast<std::uint32_t>(output_width);
@@ -1123,6 +1252,15 @@ Result<void> FfmpegTranscodePipeline::run(
         const auto processed = rtx_->process(rtx_frame, request.processing);
         if (!processed.ok()) {
             return Result<void>::Fail(processed.error());
+        }
+
+        const auto encoder_converted = rtx_to_encoder_converter.convert(
+            rtx_output_texture.Get(),
+            0,
+            output_texture,
+            output_slice);
+        if (!encoder_converted.ok()) {
+            return Result<void>::Fail(encoder_converted.error());
         }
 
         encoder_frame->pts = frame->pts == AV_NOPTS_VALUE
@@ -1145,7 +1283,7 @@ Result<void> FfmpegTranscodePipeline::run(
         ++frames_done;
         emit_progress(JobStage::encoding, frames_done);
 
-        return drain_encoder(encoder_context.get(), output.get(), output_stream);
+        return drain_encoder(encoder_context.get(), output.get(), output_stream, encoder_packet.get());
     };
 
     auto receive_decoder_frames = [&]() -> Result<void> {
@@ -1243,7 +1381,7 @@ Result<void> FfmpegTranscodePipeline::run(
             "NVENC could not flush.",
             result));
     }
-    const auto encoded_flush = drain_encoder(encoder_context.get(), output.get(), output_stream);
+    const auto encoded_flush = drain_encoder(encoder_context.get(), output.get(), output_stream, encoder_packet.get());
     if (!encoded_flush.ok()) {
         return Result<void>::Fail(encoded_flush.error());
     }
@@ -1254,6 +1392,8 @@ Result<void> FfmpegTranscodePipeline::run(
         muxing.progress = 0.99;
         muxing.frames_done = frames_done;
         muxing.frames_total = frames_total;
+        muxing.fps = smoothed_fps;
+        muxing.eta_seconds = 0;
         progress(muxing);
     }
 
@@ -1292,6 +1432,8 @@ Result<void> FfmpegTranscodePipeline::run(
         finalizing.progress = 1.0;
         finalizing.frames_done = frames_done;
         finalizing.frames_total = frames_total;
+        finalizing.fps = smoothed_fps;
+        finalizing.eta_seconds = 0;
         progress(finalizing);
     }
     return Result<void>::Ok();

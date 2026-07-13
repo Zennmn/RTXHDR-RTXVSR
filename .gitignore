@@ -9,6 +9,8 @@ artifacts/
 node_modules/
 .vite/
 .vs/
+**/bin/
+**/obj/
 *.log
 *.ilk
 *.pdb
@@ -25,3 +27,47 @@ node_modules/
 *.yuv
 RTX_Video_SDK_v1.1.0/
 RTX_Video_SDK_v1.1.0.zip
+/ffmpeg-*/
+
+# Environment variables
+.env
+.env.*
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# Visual Studio user/cache files
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.db
+*.opendb
+ipch/
+
+# CMake cache / in-source artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# vcpkg manifest mode installed dependencies
+vcpkg_installed/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Local design QA and agent working notes
+frontend/rtx-video-converter-winui/qa/
+design-qa.md
+findings.md
+progress.md
+task_plan.md
+/参考/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

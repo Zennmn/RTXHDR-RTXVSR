@@ -59,6 +59,20 @@ TEST(JsonDto, DefaultsOutputFieldsAndChoosesCodecFromHdr) {
     EXPECT_EQ(vsr.value().output.video_codec, "h264");
 }
 
+TEST(JsonDto, ParsesAv1OutputCodec) {
+    const auto json = nlohmann::json::parse(R"json({
+      "inputPath": "C:\\Videos\\in.mp4",
+      "outputPath": "C:\\Videos\\out.mp4",
+      "processing": { "vsr": { "enabled": true } },
+      "output": { "videoCodec": "av1" }
+    })json");
+
+    const auto parsed = parse_transcode_request(json);
+
+    ASSERT_TRUE(parsed.ok()) << parsed.error().message;
+    EXPECT_EQ(parsed.value().output.video_codec, "av1");
+}
+
 TEST(JsonDto, ReturnsStructuredValidationErrorForInvalidRequestJson) {
     const auto json = nlohmann::json::parse(R"json({
       "inputPath": "C:\\Videos\\in.mp4",

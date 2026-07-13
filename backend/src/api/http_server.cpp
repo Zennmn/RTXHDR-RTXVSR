@@ -26,6 +26,24 @@ int status_for_cancel_error(const Error& error) {
     return 400;
 }
 
+bool authorize_request(
+    const httplib::Request& request,
+    httplib::Response& response,
+    const HttpServerOptions& options) {
+    if (options.app_session_id.empty()) {
+        return true;
+    }
+
+    const auto provided = request.get_header_value("X-App-Session-Id");
+    if (provided == options.app_session_id) {
+        return true;
+    }
+
+    response.status = 403;
+    set_json(response, error_to_json({"app_session_mismatch", "App session id does not match.", ""}));
+    return false;
+}
+
 } // namespace
 
 HttpServer::HttpServer(JobStore& store, JobRunner& runner) : HttpServer(store, runner, {}) {}
@@ -70,24 +88,24 @@ void HttpServer::stop() {
     if (worker_thread_.joinable()) {
         worker_thread_.join();
     }
+    std::thread shutdown_thread;
+    {
+        std::lock_guard lock(shutdown_mutex_);
+        if (shutdown_thread_.joinable()) {
+            shutdown_thread = std::move(shutdown_thread_);
+        }
+    }
+    if (shutdown_thread.joinable() && shutdown_thread.get_id() != std::this_thread::get_id()) {
+        shutdown_thread.join();
+    }
 }
 
 void HttpServer::bind_routes() {
-    server_.set_default_headers({
-        {"Access-Control-Allow-Origin", "*"},
-        {"Access-Control-Allow-Headers", "Content-Type"},
-        {"Access-Control-Allow-Methods", "GET, POST, OPTIONS"},
-    });
-
-    server_.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& response) {
-        response.status = 204;
-    });
-
-    server_.Get("/api/health", [this](const httplib::Request&, httplib::Response& response) {
-        nlohmann::json body{{"version", "0.1.1"}, {"ready", true}};
-        if (!options_.app_session_id.empty()) {
-            body["appSessionId"] = options_.app_session_id;
+    server_.Get("/api/health", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
         }
+        nlohmann::json body{{"version", VSR_APP_VERSION}, {"ready", true}};
         set_json(response, body);
     });
 
@@ -98,31 +116,33 @@ void HttpServer::bind_routes() {
             return;
         }
 
-        const auto body = nlohmann::json::parse(request.body, nullptr, false);
-        if (body.is_discarded()) {
-            response.status = 400;
-            set_json(response, error_to_json({"invalid_json", "Request JSON is invalid.", ""}));
-            return;
-        }
-
-        const auto requested_session = body.value("appSessionId", "");
-        if (requested_session != options_.app_session_id) {
-            response.status = 403;
-            set_json(response, error_to_json({"app_session_mismatch", "App session id does not match.", ""}));
+        if (!authorize_request(request, response, options_)) {
             return;
         }
 
         set_json(response, {{"accepted", true}});
-        std::thread([this] {
-            server_.stop();
-        }).detach();
+        {
+            std::lock_guard lock(shutdown_mutex_);
+            if (shutdown_thread_.joinable()) {
+                return;
+            }
+            shutdown_thread_ = std::thread([this] {
+                server_.stop();
+            });
+        }
     });
 
-    server_.Get("/api/capabilities", [](const httplib::Request&, httplib::Response& response) {
+    server_.Get("/api/capabilities", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
+        }
         set_json(response, capability_snapshot_to_json(detect_capabilities()));
     });
 
-    server_.Post("/api/media/probe", [](const httplib::Request& request, httplib::Response& response) {
+    server_.Post("/api/media/probe", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
+        }
         const auto body = nlohmann::json::parse(request.body, nullptr, false);
         if (body.is_discarded()) {
             response.status = 400;
@@ -148,6 +168,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Post("/api/jobs", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
+        }
         const auto body = nlohmann::json::parse(request.body, nullptr, false);
         if (body.is_discarded()) {
             response.status = 400;
@@ -188,6 +211,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Get(R"(/api/jobs/([^/]+))", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
+        }
         const auto snapshot = store_.get(request.matches[1].str());
         if (!snapshot.ok()) {
             response.status = 404;
@@ -199,6 +225,9 @@ void HttpServer::bind_routes() {
     });
 
     server_.Post(R"(/api/jobs/([^/]+)/cancel)", [this](const httplib::Request& request, httplib::Response& response) {
+        if (!authorize_request(request, response, options_)) {
+            return;
+        }
         const auto canceled = runner_.request_cancel(request.matches[1].str());
         if (!canceled.ok()) {
             response.status = status_for_cancel_error(canceled.error());
