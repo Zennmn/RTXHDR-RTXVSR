@@ -43,6 +43,7 @@ public partial class App : Application
         services.AddSingleton<IBackendProcessService, BackendProcessService>();
         services.AddSingleton<IJobHistoryService, JobHistoryService>();
         services.AddSingleton<IOutputLauncherService, OutputLauncherService>();
+        services.AddSingleton<IWindowPlacementStore, WindowPlacementStore>();
 
         services.AddSingleton<WindowContext>();
         services.AddSingleton<IFilePickerService, FilePickerService>();
