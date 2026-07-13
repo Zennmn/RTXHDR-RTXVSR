@@ -14,6 +14,7 @@ struct CapabilitySnapshot {
     bool truehdr_available = false;
     bool nvenc_h264_available = false;
     bool nvenc_hevc_main10_available = false;
+    bool nvenc_av1_available = false;
     std::vector<std::string> messages;
 };
 

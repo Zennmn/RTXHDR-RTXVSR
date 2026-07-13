@@ -2,6 +2,9 @@ param(
   [Parameter(Mandatory = $true)][string]$BackendExe,
   [Parameter(Mandatory = $true)][string]$InputPath,
   [Parameter(Mandatory = $true)][string]$OutputPath,
+  [ValidateSet("h264", "hevc", "av1")][string]$VideoCodec = "hevc",
+  [ValidateRange(1, 4)][int]$VsrQuality = 3,
+  [switch]$DisableHdr,
   [int]$Port = 49321,
   [int]$StartupTimeoutSeconds = 15,
   [int]$JobTimeoutSeconds = 180
@@ -27,10 +30,10 @@ try {
     inputPath = $InputPath
     outputPath = $OutputPath
     processing = @{
-      vsr = @{ enabled = $true; quality = 3; scale = 2.0 }
-      hdr = @{ enabled = $true; contrast = 100; saturation = 100; middleGray = 44; maxLuminance = 1000 }
+      vsr = @{ enabled = $true; quality = $VsrQuality; scale = 2.0 }
+      hdr = @{ enabled = -not $DisableHdr; contrast = 100; saturation = 100; middleGray = 44; maxLuminance = 1000 }
     }
-    output = @{ container = "mp4"; videoCodec = "hevc"; audioMode = "copy"; subtitleMode = "copy-compatible" }
+    output = @{ container = "mp4"; videoCodec = $VideoCodec; audioMode = "copy"; subtitleMode = "copy-compatible" }
   } | ConvertTo-Json -Depth 8
 
   $created = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/api/jobs" -Body $body -ContentType "application/json"

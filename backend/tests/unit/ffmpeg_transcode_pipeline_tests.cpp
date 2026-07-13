@@ -24,21 +24,42 @@ TEST(FfmpegTranscodePipelineProgress, clampsFrameProgressToActiveEncodingRange) 
     EXPECT_DOUBLE_EQ(vsr::ffmpeg_progress_from_frames(99, 100), 0.98);
 }
 
+TEST(FfmpegTranscodePipelineProgress, calculatesFpsAndEtaFromFrameSamples) {
+    const auto metrics = vsr::ffmpeg_progress_metrics(30, 120, 30, 2.0, 0.0);
+
+    EXPECT_DOUBLE_EQ(metrics.fps, 15.0);
+    EXPECT_EQ(metrics.eta_seconds, 6);
+}
+
+TEST(FfmpegTranscodePipelineProgress, smoothsLaterFpsSamples) {
+    const auto metrics = vsr::ffmpeg_progress_metrics(60, 120, 30, 1.0, 10.0);
+
+    EXPECT_DOUBLE_EQ(metrics.fps, 15.0);
+    EXPECT_EQ(metrics.eta_seconds, 4);
+}
+
+TEST(FfmpegTranscodePipelineProgress, keepsMetricsEmptyBeforeFramesComplete) {
+    const auto metrics = vsr::ffmpeg_progress_metrics(0, 120, 0, 1.0, 0.0);
+
+    EXPECT_DOUBLE_EQ(metrics.fps, 0.0);
+    EXPECT_EQ(metrics.eta_seconds, 0);
+}
+
 TEST(FfmpegTranscodePipelineOptions, choosesRequestedNvencCodecForSdrOutput) {
     vsr::OutputSettings output;
     output.video_codec = "hevc";
 
-    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output, false), "hevc_nvenc");
+    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output), "hevc_nvenc");
 
     output.video_codec = "h264";
-    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output, false), "h264_nvenc");
+    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output), "h264_nvenc");
 }
 
-TEST(FfmpegTranscodePipelineOptions, forcesHevcNvencForHdrOutput) {
+TEST(FfmpegTranscodePipelineOptions, choosesAv1NvencWhenRequested) {
     vsr::OutputSettings output;
-    output.video_codec = "h264";
+    output.video_codec = "av1";
 
-    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output, true), "hevc_nvenc");
+    EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output), "av1_nvenc");
 }
 
 TEST(FfmpegTranscodePipelineOptions, detectsDefaultCopyModes) {

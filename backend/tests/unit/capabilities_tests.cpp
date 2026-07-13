@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -15,6 +16,7 @@ TEST(Capabilities, SerializesAllPublicKeys) {
     snapshot.truehdr_available = false;
     snapshot.nvenc_h264_available = false;
     snapshot.nvenc_hevc_main10_available = false;
+    snapshot.nvenc_av1_available = false;
 
     const auto json = capability_snapshot_to_json(snapshot);
     const std::set<std::string> keys = {
@@ -24,6 +26,7 @@ TEST(Capabilities, SerializesAllPublicKeys) {
         "truehdrAvailable",
         "nvencH264Available",
         "nvencHevcMain10Available",
+        "nvencAv1Available",
         "messages",
     };
 
@@ -34,6 +37,7 @@ TEST(Capabilities, SerializesAllPublicKeys) {
     EXPECT_TRUE(json.contains("truehdrAvailable"));
     EXPECT_TRUE(json.contains("nvencH264Available"));
     EXPECT_TRUE(json.contains("nvencHevcMain10Available"));
+    EXPECT_TRUE(json.contains("nvencAv1Available"));
     EXPECT_TRUE(json.contains("messages"));
     for (const auto& item : json.items()) {
         EXPECT_TRUE(keys.contains(item.key())) << item.key();
@@ -52,6 +56,7 @@ TEST(Capabilities, SerializesUnavailableHardwareSnapshot) {
     EXPECT_FALSE(json["truehdrAvailable"]);
     EXPECT_FALSE(json["nvencH264Available"]);
     EXPECT_FALSE(json["nvencHevcMain10Available"]);
+    EXPECT_FALSE(json["nvencAv1Available"]);
 }
 
 TEST(Capabilities, PreservesMessages) {
@@ -64,3 +69,17 @@ TEST(Capabilities, PreservesMessages) {
     EXPECT_EQ(json["messages"][0], "first message");
     EXPECT_EQ(json["messages"][1], "second message");
 }
+
+#if !defined(VSR_ENABLE_RTX_SDK)
+TEST(Capabilities, NeverReportsRtxFeaturesWhenSdkSupportIsNotCompiled) {
+    const auto snapshot = detect_capabilities();
+
+    EXPECT_FALSE(snapshot.rtx_sdk_found);
+    EXPECT_FALSE(snapshot.vsr_available);
+    EXPECT_FALSE(snapshot.truehdr_available);
+    EXPECT_NE(
+        std::find(snapshot.messages.begin(), snapshot.messages.end(),
+                  "RTX Video SDK support is not enabled in this backend build."),
+        snapshot.messages.end());
+}
+#endif

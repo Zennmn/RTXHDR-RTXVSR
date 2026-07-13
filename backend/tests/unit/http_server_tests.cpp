@@ -100,6 +100,7 @@ class TestHttpServer {
 public:
     explicit TestHttpServer(HttpServerOptions options = {})
         : port_(reserve_unused_local_port()),
+          session_id_(options.app_session_id),
           runner_(store_, std::make_unique<FakePipeline>(FakePipelineMode::succeeds)),
           server_(store_, runner_, std::move(options)) {}
 
@@ -123,7 +124,11 @@ public:
 
         httplib::Client client("127.0.0.1", port_);
         for (int i = 0; i < 40; ++i) {
-            if (const auto response = client.Get("/api/health"); response && response->status == 200) {
+            httplib::Headers headers;
+            if (!session_id_.empty()) {
+                headers.emplace("X-App-Session-Id", session_id_);
+            }
+            if (const auto response = client.Get("/api/health", headers); response && response->status == 200) {
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -133,6 +138,7 @@ public:
 
 private:
     int port_;
+    std::string session_id_;
     JobStore store_;
     JobRunner runner_;
     HttpServer server_;
@@ -141,39 +147,25 @@ private:
 
 } // namespace
 
-TEST(HttpServer, respondsToCorsPreflight) {
-    TestHttpServer server;
-    ASSERT_TRUE(server.start());
-    httplib::Client client("127.0.0.1", server.port());
-    httplib::Headers headers{
-        {"Origin", "http://127.0.0.1:3000"},
-        {"Access-Control-Request-Method", "POST"},
-    };
-
-    const auto response = client.Options("/api/jobs", headers);
-
-    ASSERT_TRUE(response);
-    EXPECT_EQ(response->status, 204);
-    const auto origin = response->headers.find("Access-Control-Allow-Origin");
-    ASSERT_NE(origin, response->headers.end());
-    EXPECT_EQ(origin->second, "*");
-}
-
-TEST(HttpServer, healthIncludesAppSessionIdWhenConfigured) {
+TEST(HttpServer, healthRequiresButDoesNotDiscloseAppSessionIdWhenConfigured) {
     HttpServerOptions options;
     options.app_session_id = "test-session-123";
     TestHttpServer server(std::move(options));
     ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
 
-    const auto response = client.Get("/api/health");
+    const auto unauthorized = client.Get("/api/health");
+    ASSERT_TRUE(unauthorized);
+    EXPECT_EQ(unauthorized->status, 403);
+
+    const auto response = client.Get("/api/health", {{"X-App-Session-Id", "test-session-123"}});
 
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 200);
     const auto body = nlohmann::json::parse(response->body);
     EXPECT_EQ(body.at("version"), "0.1.1");
     EXPECT_EQ(body.at("ready"), true);
-    EXPECT_EQ(body.at("appSessionId"), "test-session-123");
+    EXPECT_FALSE(body.contains("appSessionId"));
 }
 
 TEST(HttpServer, healthOmitsAppSessionIdWhenNotConfigured) {
@@ -189,32 +181,44 @@ TEST(HttpServer, healthOmitsAppSessionIdWhenNotConfigured) {
     EXPECT_FALSE(body.contains("appSessionId"));
 }
 
-TEST(HttpServer, appShutdownUnavailableWithoutAppSession) {
-    TestHttpServer server;
-    ASSERT_TRUE(server.start());
-    httplib::Client client("127.0.0.1", server.port());
-
-    const auto response = client.Post("/api/app/shutdown",
-                                      nlohmann::json{{"appSessionId", "test-session-123"}}.dump(),
-                                      "application/json");
-
-    ASSERT_TRUE(response);
-    EXPECT_EQ(response->status, 404);
-    EXPECT_NE(response->body.find("app_shutdown_unavailable"), std::string::npos);
-}
-
-TEST(HttpServer, appShutdownRejectsInvalidJson) {
+TEST(HttpServer, protectedApiRejectsMissingSessionHeader) {
     HttpServerOptions options;
     options.app_session_id = "test-session-123";
     TestHttpServer server(std::move(options));
     ASSERT_TRUE(server.start());
     httplib::Client client("127.0.0.1", server.port());
 
-    const auto response = client.Post("/api/app/shutdown", "{", "application/json");
+    const auto response = client.Post("/api/media/probe", "{}", "application/json");
 
     ASSERT_TRUE(response);
-    EXPECT_EQ(response->status, 400);
-    EXPECT_NE(response->body.find("invalid_json"), std::string::npos);
+    EXPECT_EQ(response->status, 403);
+    EXPECT_NE(response->body.find("app_session_mismatch"), std::string::npos);
+}
+
+TEST(HttpServer, appShutdownUnavailableWithoutAppSession) {
+    TestHttpServer server;
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+
+    const auto response = client.Post("/api/app/shutdown", "{}", "application/json");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 404);
+    EXPECT_NE(response->body.find("app_shutdown_unavailable"), std::string::npos);
+}
+
+TEST(HttpServer, appShutdownRejectsMissingSessionHeader) {
+    HttpServerOptions options;
+    options.app_session_id = "test-session-123";
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+
+    const auto response = client.Post("/api/app/shutdown", "{}", "application/json");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 403);
+    EXPECT_NE(response->body.find("app_session_mismatch"), std::string::npos);
 }
 
 TEST(HttpServer, appShutdownRejectsMismatchedAppSession) {
@@ -225,12 +229,30 @@ TEST(HttpServer, appShutdownRejectsMismatchedAppSession) {
     httplib::Client client("127.0.0.1", server.port());
 
     const auto response = client.Post("/api/app/shutdown",
-                                      nlohmann::json{{"appSessionId", "wrong-session"}}.dump(),
+                                      {{"X-App-Session-Id", "wrong-session"}},
+                                      "{}",
                                       "application/json");
 
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 403);
     EXPECT_NE(response->body.find("app_session_mismatch"), std::string::npos);
+}
+
+TEST(HttpServer, appShutdownAcceptsMatchingSessionHeader) {
+    HttpServerOptions options;
+    options.app_session_id = "test-session-123";
+    TestHttpServer server(std::move(options));
+    ASSERT_TRUE(server.start());
+    httplib::Client client("127.0.0.1", server.port());
+
+    const auto response = client.Post("/api/app/shutdown",
+                                      {{"X-App-Session-Id", "test-session-123"}},
+                                      "{}",
+                                      "application/json");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+    EXPECT_NE(response->body.find("\"accepted\":true"), std::string::npos);
 }
 
 TEST(HttpServer, rejectsInvalidProbeJson) {

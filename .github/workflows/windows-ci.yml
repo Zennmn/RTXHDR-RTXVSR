@@ -1,0 +1,24 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Configure backend
+        run: cmake -S backend -B build/backend -DVSR_ENABLE_TESTS=ON -DVSR_ENABLE_FFMPEG=OFF -DVSR_ENABLE_RTX_SDK=OFF
+      - name: Build backend
+        run: cmake --build build/backend --target vsr_backend_tests vsr_backend --config Release
+      - name: Test backend
+        run: ctest --test-dir build/backend -C Release --output-on-failure
+      - name: Test WinUI core
+        run: dotnet test frontend/rtx-video-converter-winui-core-tests/RTXVideoConverter.Core.Tests.csproj -c Release
+      - name: Build WinUI
+        run: dotnet build frontend/rtx-video-converter-winui/RTXVideoConverter.WinUI.csproj -c Release -p:Platform=x64

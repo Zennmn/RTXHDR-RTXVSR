@@ -77,6 +77,33 @@ TEST(JobRequestValidation, acceptsVsrHdrMp4Request) {
     ASSERT_TRUE(result.ok()) << result.error().message;
 }
 
+TEST(JobRequestValidation, acceptsAv1ForSdrAndHdrMp4Output) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.vsr.enabled = true;
+    request.output.video_codec = "av1";
+
+    ASSERT_TRUE(validate_request(request).ok());
+
+    request.processing.hdr.enabled = true;
+    const auto hdr_result = validate_request(request);
+    ASSERT_TRUE(hdr_result.ok()) << hdr_result.error().message;
+}
+
+TEST(JobRequestValidation, rejectsH264ForHdrOutput) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.hdr.enabled = true;
+    request.output.video_codec = "h264";
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "hdr_requires_10bit_codec");
+}
+
 TEST(JobRequestValidation, acceptsExplicitlyDroppingAudioAndSubtitles) {
     TranscodeRequest request;
     request.input_path = "C:\\Videos\\in.mp4";
@@ -116,6 +143,20 @@ TEST(JobRequestValidation, rejectsUnsupportedSubtitleMode) {
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error().code, "unsupported_subtitle_mode");
     EXPECT_EQ(result.error().details, "copy-all");
+}
+
+TEST(JobRequestValidation, rejectsHdrLuminanceOutsideSdkRange) {
+    TranscodeRequest request;
+    request.input_path = "C:\\Videos\\in.mp4";
+    request.output_path = "C:\\Videos\\out.mp4";
+    request.processing.hdr.enabled = true;
+    request.output.video_codec = "hevc";
+    request.processing.hdr.max_luminance = 4000;
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "invalid_hdr_max_luminance");
 }
 
 TEST(JobDomainTypes, jobRecordPreservesFullRequestWhileSnapshotRemainsPathFocused) {

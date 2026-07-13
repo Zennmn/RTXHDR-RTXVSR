@@ -14,6 +14,12 @@ vsr_backend.exe --port 49321 --app-session-id <opaque-session-id>
 
 The session id lets the frontend confirm that it is talking to the backend instance it launched and request shutdown of only that owned instance. Standalone launches can omit `--app-session-id`; app-owned shutdown is then unavailable.
 
+When a session id is configured, every API request must include it without exposing it in a URL or response:
+
+```text
+X-App-Session-Id: <opaque-session-id>
+```
+
 ## Health
 
 `GET http://127.0.0.1:49321/api/health`
@@ -27,8 +33,10 @@ Response:
 When launched with `--app-session-id`, health includes the owner session:
 
 ```json
-{ "version": "0.1.1", "ready": true, "appSessionId": "<opaque-session-id>" }
+{ "version": "0.1.1", "ready": true }
 ```
+
+A successful authenticated health response proves ownership; the backend deliberately does not echo the secret.
 
 ## Capabilities
 
@@ -46,6 +54,7 @@ Response:
   "truehdrAvailable": true,
   "nvencH264Available": true,
   "nvencHevcMain10Available": true,
+  "nvencAv1Available": true,
   "messages": []
 }
 ```
@@ -97,6 +106,8 @@ Request:
   "output": { "container": "mp4", "videoCodec": "hevc", "audioMode": "copy", "subtitleMode": "copy-compatible" }
 }
 ```
+
+`videoCodec` accepts `h264`, `hevc`, or `av1`. HDR requests require `hevc` or `av1`; the backend emits 10-bit BT.2020/PQ output for either HDR codec.
 
 Response:
 
@@ -172,7 +183,7 @@ Use this only when the frontend launched the backend with `--app-session-id`.
 Request:
 
 ```json
-{ "appSessionId": "<opaque-session-id>" }
+{}
 ```
 
 Response:
@@ -184,6 +195,8 @@ Response:
 The backend accepts shutdown only when the request session id matches the configured session id. On success, it returns immediately and stops the HTTP server asynchronously.
 
 ## HTTP Statuses
+
+When the backend is app-owned, every endpoint returns `403 app_session_mismatch` before processing if `X-App-Session-Id` is missing or incorrect.
 
 - `GET /api/health`: `200`.
 - `GET /api/capabilities`: `200`.
@@ -213,7 +226,7 @@ Error responses always use:
 - HDR saturation: integer, default 100.
 - HDR middle gray: integer, default 44.
 - HDR max luminance: integer nits, default 1000.
-- HDR output codec: `hevc`.
+- HDR output codec: `hevc` or `av1`.
 - VSR-only default codec: `h264`.
 - Audio mode: `copy` or `none`, default `copy`.
 - Subtitle mode: `copy-compatible` or `none`, default `copy-compatible`.

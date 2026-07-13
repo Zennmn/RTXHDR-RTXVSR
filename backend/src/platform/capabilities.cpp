@@ -1,6 +1,11 @@
 #include "platform/capabilities.h"
 
 #include <filesystem>
+#include <string_view>
+
+#if defined(VSR_ENABLE_RTX_SDK)
+#include <rtx_video_api.h>
+#endif
 
 #if defined(VSR_ENABLE_FFMPEG)
 extern "C" {
@@ -109,6 +114,45 @@ bool detect_d3d11_available() {
 #endif
 }
 
+#if defined(VSR_ENABLE_RTX_SDK) && defined(_WIN32)
+bool detect_rtx_runtime_available(bool enable_hdr, bool enable_vsr) {
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    D3D_FEATURE_LEVEL feature_level = {};
+    const D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+    };
+
+    HRESULT result = D3D11CreateDevice(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+        D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        levels, static_cast<UINT>(std::size(levels)), D3D11_SDK_VERSION,
+        &device, &feature_level, &context);
+    if (result == E_INVALIDARG) {
+        result = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+            D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            levels + 1, static_cast<UINT>(std::size(levels) - 1), D3D11_SDK_VERSION,
+            &device, &feature_level, &context);
+    }
+    if (FAILED(result)) {
+        return false;
+    }
+
+    const API_BOOL created = rtx_video_api_dx11_create(
+        device,
+        enable_hdr ? API_BOOL_SUCCESS : API_BOOL_FAIL,
+        enable_vsr ? API_BOOL_SUCCESS : API_BOOL_FAIL);
+    rtx_video_api_dx11_shutdown();
+    context->Release();
+    device->Release();
+    return created == API_BOOL_SUCCESS;
+}
+#endif
+
 bool ffmpeg_encoder_available(const char* name) {
 #if defined(VSR_ENABLE_FFMPEG)
     return avcodec_find_encoder_by_name(name) != nullptr;
@@ -119,7 +163,7 @@ bool ffmpeg_encoder_available(const char* name) {
 }
 
 #if defined(VSR_ENABLE_FFMPEG) && defined(_WIN32)
-bool detect_nvenc_d3d11_available_uncached(const char* encoder_name, AVPixelFormat software_format, bool hevc_main10) {
+bool detect_nvenc_d3d11_available_uncached(const char* encoder_name, AVPixelFormat software_format, bool ten_bit_hdr) {
     const AVCodec* encoder = avcodec_find_encoder_by_name(encoder_name);
     if (encoder == nullptr) {
         return false;
@@ -194,8 +238,7 @@ bool detect_nvenc_d3d11_available_uncached(const char* encoder_name, AVPixelForm
             frames->initial_pool_size = 1;
 
             auto* d3d11_frames = reinterpret_cast<AVD3D11VAFramesContext*>(frames->hwctx);
-            d3d11_frames->BindFlags =
-                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+            d3d11_frames->BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
             result = av_hwframe_ctx_init(frames_ref);
             if (result >= 0) {
@@ -207,17 +250,20 @@ bool detect_nvenc_d3d11_available_uncached(const char* encoder_name, AVPixelForm
                     encoder_context->framerate = AVRational{30, 1};
                     encoder_context->pix_fmt = AV_PIX_FMT_D3D11;
                     encoder_context->sw_pix_fmt = software_format;
-                    if (hevc_main10) {
-                        encoder_context->profile = 2;
+                    if (ten_bit_hdr) {
                         encoder_context->color_primaries = AVCOL_PRI_BT2020;
                         encoder_context->color_trc = AVCOL_TRC_SMPTE2084;
                         encoder_context->colorspace = AVCOL_SPC_BT2020_NCL;
                         encoder_context->color_range = AVCOL_RANGE_MPEG;
                     }
                     encoder_context->hw_frames_ctx = av_buffer_ref(frames_ref);
-                    if (hevc_main10) {
+                    if (ten_bit_hdr && std::string_view(encoder_name) == "hevc_nvenc") {
+                        encoder_context->profile = 2;
                         av_opt_set(encoder_context->priv_data, "profile", "main10", 0);
                         av_opt_set(encoder_context->priv_data, "tier", "main", 0);
+                    } else if (ten_bit_hdr && std::string_view(encoder_name) == "av1_nvenc") {
+                        encoder_context->profile = AV_PROFILE_AV1_MAIN;
+                        av_opt_set_int(encoder_context->priv_data, "highbitdepth", 1, 0);
                     }
                     av_opt_set(encoder_context->priv_data, "preset", "p4", 0);
                     available = encoder_context->hw_frames_ctx != nullptr &&
@@ -238,7 +284,7 @@ bool detect_nvenc_d3d11_available_uncached(const char* encoder_name, AVPixelForm
 
 bool detect_h264_nvenc_d3d11_available() {
 #if defined(VSR_ENABLE_FFMPEG) && defined(_WIN32)
-    static const bool available = detect_nvenc_d3d11_available_uncached("h264_nvenc", AV_PIX_FMT_BGRA, false);
+    static const bool available = detect_nvenc_d3d11_available_uncached("h264_nvenc", AV_PIX_FMT_NV12, false);
     return available;
 #else
     return false;
@@ -247,7 +293,18 @@ bool detect_h264_nvenc_d3d11_available() {
 
 bool detect_hevc_nvenc_main10_d3d11_available() {
 #if defined(VSR_ENABLE_FFMPEG) && defined(_WIN32)
-    static const bool available = detect_nvenc_d3d11_available_uncached("hevc_nvenc", AV_PIX_FMT_X2BGR10, true);
+    static const bool available = detect_nvenc_d3d11_available_uncached("hevc_nvenc", AV_PIX_FMT_P010LE, true);
+    return available;
+#else
+    return false;
+#endif
+}
+
+bool detect_av1_nvenc_d3d11_available() {
+#if defined(VSR_ENABLE_FFMPEG) && defined(_WIN32)
+    static const bool available =
+        detect_nvenc_d3d11_available_uncached("av1_nvenc", AV_PIX_FMT_NV12, false) &&
+        detect_nvenc_d3d11_available_uncached("av1_nvenc", AV_PIX_FMT_P010LE, true);
     return available;
 #else
     return false;
@@ -264,6 +321,7 @@ nlohmann::json capability_snapshot_to_json(const CapabilitySnapshot& snapshot) {
         {"truehdrAvailable", snapshot.truehdr_available},
         {"nvencH264Available", snapshot.nvenc_h264_available},
         {"nvencHevcMain10Available", snapshot.nvenc_hevc_main10_available},
+        {"nvencAv1Available", snapshot.nvenc_av1_available},
         {"messages", snapshot.messages},
     };
 }
@@ -288,18 +346,34 @@ CapabilitySnapshot detect_capabilities() {
         snapshot.messages.push_back("nvngx_truehdr.dll was not found beside the backend executable.");
     }
 
+#if defined(VSR_ENABLE_RTX_SDK)
     snapshot.rtx_sdk_found = vsr_dll_found && truehdr_dll_found;
-    snapshot.vsr_available = snapshot.d3d11_available && vsr_dll_found;
-    snapshot.truehdr_available = snapshot.d3d11_available && truehdr_dll_found;
+    const bool runtime_available = snapshot.d3d11_available && (vsr_dll_found || truehdr_dll_found) &&
+        detect_rtx_runtime_available(truehdr_dll_found, vsr_dll_found);
+    snapshot.vsr_available = runtime_available && vsr_dll_found;
+    snapshot.truehdr_available = runtime_available && truehdr_dll_found;
+    if ((vsr_dll_found || truehdr_dll_found) && !runtime_available) {
+        snapshot.messages.push_back("RTX Video SDK runtime initialization failed for the current GPU or driver.");
+    }
+#else
+    snapshot.rtx_sdk_found = false;
+    snapshot.vsr_available = false;
+    snapshot.truehdr_available = false;
+    snapshot.messages.push_back("RTX Video SDK support is not enabled in this backend build.");
+#endif
 
     const bool h264_nvenc_found = ffmpeg_encoder_available("h264_nvenc");
     const bool hevc_nvenc_found = ffmpeg_encoder_available("hevc_nvenc");
+    const bool av1_nvenc_found = ffmpeg_encoder_available("av1_nvenc");
     const bool h264_d3d11_found =
         snapshot.d3d11_available && h264_nvenc_found && detect_h264_nvenc_d3d11_available();
     const bool hevc_main10_d3d11_found =
         snapshot.d3d11_available && hevc_nvenc_found && detect_hevc_nvenc_main10_d3d11_available();
+    const bool av1_d3d11_found =
+        snapshot.d3d11_available && av1_nvenc_found && detect_av1_nvenc_d3d11_available();
     snapshot.nvenc_h264_available = h264_d3d11_found;
     snapshot.nvenc_hevc_main10_available = hevc_main10_d3d11_found;
+    snapshot.nvenc_av1_available = av1_d3d11_found;
 #if !defined(VSR_ENABLE_FFMPEG)
     snapshot.messages.push_back("FFmpeg support is not enabled in this backend build.");
 #else
@@ -312,6 +386,11 @@ CapabilitySnapshot detect_capabilities() {
         snapshot.messages.push_back("FFmpeg hevc_nvenc encoder was not found.");
     } else if (!hevc_main10_d3d11_found) {
         snapshot.messages.push_back("FFmpeg hevc_nvenc Main10 D3D11 encode path is unavailable.");
+    }
+    if (!av1_nvenc_found) {
+        snapshot.messages.push_back("FFmpeg av1_nvenc encoder was not found.");
+    } else if (!av1_d3d11_found) {
+        snapshot.messages.push_back("FFmpeg av1_nvenc 8/10-bit D3D11 encode paths are unavailable.");
     }
 #endif
 

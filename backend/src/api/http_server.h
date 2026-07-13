@@ -42,6 +42,8 @@ private:
     std::condition_variable worker_cv_;
     std::deque<std::string> pending_jobs_;
     std::thread worker_thread_;
+    std::thread shutdown_thread_;
+    std::mutex shutdown_mutex_;
     std::string current_job_;
     bool stopping_ = false;
 };

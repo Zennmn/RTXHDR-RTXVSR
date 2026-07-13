@@ -2,7 +2,7 @@
 
 Windows UI workspace.
 
-The current React/Vite UI project lives in `rtx-video-converter/`.
+The production WinUI 3 app lives in `rtx-video-converter-winui/`, with testable application logic in `rtx-video-converter-winui-core/`.
 
 Keep the UI as a separate project in this folder and talk to the backend through the local HTTP API documented in `../FRONTEND_INTEGRATION.md`.
 

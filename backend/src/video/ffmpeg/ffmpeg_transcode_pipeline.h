@@ -22,8 +22,41 @@ inline double ffmpeg_progress_from_frames(std::int64_t frames_done, std::int64_t
     return value < 0.10 ? 0.10 : (value > 0.98 ? 0.98 : value);
 }
 
-inline const char* ffmpeg_nvenc_encoder_name(const OutputSettings& output, bool hdr_enabled) {
-    if (hdr_enabled || output.video_codec == "hevc") {
+struct FfmpegProgressMetrics {
+    double fps = 0.0;
+    std::int64_t eta_seconds = 0;
+};
+
+inline FfmpegProgressMetrics ffmpeg_progress_metrics(
+    std::int64_t frames_done,
+    std::int64_t frames_total,
+    std::int64_t frames_since_sample,
+    double seconds_since_sample,
+    double previous_fps) {
+    double fps = previous_fps;
+    if (frames_since_sample > 0 && seconds_since_sample > 0.0) {
+        const double instantaneous_fps = static_cast<double>(frames_since_sample) / seconds_since_sample;
+        // Smooth subsequent samples so the UI stays readable when individual RTX
+        // frames have uneven processing times.
+        constexpr double smoothing_factor = 0.25;
+        fps = previous_fps > 0.0
+            ? previous_fps + smoothing_factor * (instantaneous_fps - previous_fps)
+            : instantaneous_fps;
+    }
+
+    std::int64_t eta_seconds = 0;
+    if (fps > 0.0 && frames_total > frames_done) {
+        eta_seconds = static_cast<std::int64_t>(std::ceil(
+            static_cast<double>(frames_total - frames_done) / fps));
+    }
+    return {fps, eta_seconds};
+}
+
+inline const char* ffmpeg_nvenc_encoder_name(const OutputSettings& output) {
+    if (output.video_codec == "av1") {
+        return "av1_nvenc";
+    }
+    if (output.video_codec == "hevc") {
         return "hevc_nvenc";
     }
     return "h264_nvenc";
