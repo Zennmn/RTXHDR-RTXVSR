@@ -2,6 +2,7 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version = "1.0.0",
     [string]$PublishDirectory = "",
+    [string]$FfmpegArtifactRoot = "",
     [string]$InnoCompiler = ""
 )
 
@@ -21,6 +22,15 @@ if ([string]::IsNullOrWhiteSpace($PublishDirectory)) {
     $PublishDirectory = Join-Path $root "frontend\rtx-video-converter-winui\bin\publish\win-x64"
 }
 $PublishDirectory = [System.IO.Path]::GetFullPath($PublishDirectory)
+if ([string]::IsNullOrWhiteSpace($FfmpegArtifactRoot)) {
+    $FfmpegArtifactRoot = Join-Path $root "artifacts\ffmpeg-minimal"
+}
+$FfmpegArtifactRoot = [System.IO.Path]::GetFullPath($FfmpegArtifactRoot)
+
+& (Join-Path $root "verify-release-compliance.ps1") `
+    -PublishDirectory $PublishDirectory `
+    -FfmpegArtifactRoot $FfmpegArtifactRoot `
+    -Version $Version
 
 $requiredPublishFiles = @(
     (Join-Path $PublishDirectory "RTXVideoConverter.WinUI.exe"),
@@ -59,8 +69,10 @@ foreach ($unwanted in @("qa", "startup-error.txt")) {
 }
 
 Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination (Join-Path $payloadDirectory "LICENSE.txt")
+Copy-Item -LiteralPath (Join-Path $root "DISTRIBUTION_TERMS.txt") -Destination $payloadDirectory
 Copy-Item -LiteralPath (Join-Path $root "THIRD_PARTY.md") -Destination $payloadDirectory
-Copy-Item -LiteralPath (Join-Path $root "ffmpeg-master-latest-win64-lgpl-shared\LICENSE.txt") -Destination (Join-Path $payloadDirectory "FFMPEG_LICENSE.txt")
+Copy-Item -LiteralPath (Join-Path $FfmpegArtifactRoot "runtime\FFMPEG_LICENSE_LGPLv2.1.txt") -Destination $payloadDirectory
+Copy-Item -LiteralPath (Join-Path $FfmpegArtifactRoot "runtime\NV_CODEC_HEADERS_LICENSE.txt") -Destination $payloadDirectory
 Copy-Item -LiteralPath (Join-Path $root "RTX_Video_SDK_v1.1.0\NVIDIA_RTX_Video_SDK_License.pdf") -Destination $payloadDirectory
 $portableReadme = (Get-Content -Raw (Join-Path $root "packaging\README-portable.txt")).Replace("{{VERSION}}", $Version)
 [System.IO.File]::WriteAllText(
@@ -70,6 +82,16 @@ $portableReadme = (Get-Content -Raw (Join-Path $root "packaging\README-portable.
 
 $portableZip = Join-Path $releaseDirectory "RTX.Video.Converter_${Version}_x64-portable.zip"
 Compress-Archive -Path (Join-Path $payloadDirectory "*") -DestinationPath $portableZip -CompressionLevel Optimal
+
+$sourcePayload = Join-Path $stageRoot "FFmpeg corresponding source"
+New-Item -ItemType Directory -Force -Path $sourcePayload | Out-Null
+Copy-Item -Path (Join-Path $FfmpegArtifactRoot "sources\*") -Destination $sourcePayload -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $root "third_party\ffmpeg\Dockerfile") -Destination $sourcePayload
+Copy-Item -LiteralPath (Join-Path $root "third_party\ffmpeg\README.md") -Destination $sourcePayload
+Copy-Item -LiteralPath (Join-Path $root "third_party\ffmpeg\NV_CODEC_HEADERS_LICENSE.txt") -Destination $sourcePayload
+Copy-Item -LiteralPath (Join-Path $root "build-minimal-ffmpeg.ps1") -Destination $sourcePayload
+$sourceZip = Join-Path $releaseDirectory "RTX.Video.Converter_${Version}_FFmpeg-corresponding-source.zip"
+Compress-Archive -Path (Join-Path $sourcePayload "*") -DestinationPath $sourceZip -CompressionLevel Optimal
 
 if ([string]::IsNullOrWhiteSpace($InnoCompiler)) {
     $compilerCandidates = @(
@@ -94,7 +116,7 @@ if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
     throw "Installer output was not created: $installer"
 }
 
-$artifacts = @($portableZip, $installer)
+$artifacts = @($portableZip, $installer, $sourceZip)
 $hashLines = foreach ($artifact in $artifacts) {
     $hash = Get-FileHash -LiteralPath $artifact -Algorithm SHA256
     "$($hash.Hash)  $([System.IO.Path]::GetFileName($artifact))"

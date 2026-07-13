@@ -58,19 +58,20 @@ Result<MediaProbeSummary> probe_media_for_ui(const std::string& path) {
 #if defined(VSR_ENABLE_FFMPEG)
     const auto detailed = probe_media(path);
     if (!detailed.ok()) {
-        return Result<MediaProbeSummary>::Fail(detailed.error());
+        summary.warnings.push_back(
+            "FFmpeg could not read detailed media metadata: " + detailed.error().message);
+    } else {
+        const auto& media = detailed.value();
+        if (media.width > 0 && media.height > 0) {
+            summary.resolution = std::to_string(media.width) + "x" + std::to_string(media.height);
+        }
+        summary.duration = format_duration_seconds(media.duration_seconds);
+        summary.codec = media.codec_name;
+        if (media.bit_depth > 0) {
+            summary.codec += " " + std::to_string(media.bit_depth) + "-bit";
+        }
+        summary.warnings.insert(summary.warnings.end(), media.warnings.begin(), media.warnings.end());
     }
-
-    const auto& media = detailed.value();
-    if (media.width > 0 && media.height > 0) {
-        summary.resolution = std::to_string(media.width) + "x" + std::to_string(media.height);
-    }
-    summary.duration = format_duration_seconds(media.duration_seconds);
-    summary.codec = media.codec_name;
-    if (media.bit_depth > 0) {
-        summary.codec += " " + std::to_string(media.bit_depth) + "-bit";
-    }
-    summary.warnings.insert(summary.warnings.end(), media.warnings.begin(), media.warnings.end());
 #else
     summary.warnings.push_back("FFmpeg support is not enabled; detailed media metadata is unavailable.");
 #endif

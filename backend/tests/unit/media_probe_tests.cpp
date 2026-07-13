@@ -56,10 +56,8 @@ TEST(MediaProbeService, returnsFallbackFileMetadataWhenDetailedProbeIsUnavailabl
     ASSERT_TRUE(result.ok()) << result.error().message;
     EXPECT_EQ(result.value().name, path.filename().string());
     EXPECT_EQ(result.value().size_bytes, 4);
-#if !defined(VSR_ENABLE_FFMPEG)
     EXPECT_EQ(result.value().resolution, "");
     EXPECT_EQ(result.value().duration, "");
     EXPECT_EQ(result.value().codec, "");
     ASSERT_FALSE(result.value().warnings.empty());
-#endif
 }
