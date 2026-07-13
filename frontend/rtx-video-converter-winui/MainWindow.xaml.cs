@@ -3,6 +3,8 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using RTXVideoConverter.Core.Models;
+using RTXVideoConverter.Core.Services;
 using RTXVideoConverter.Core.ViewModels;
 using RTXVideoConverter.WinUI.Services;
 using RTXVideoConverter.WinUI.Views;
@@ -17,6 +19,10 @@ public sealed partial class MainWindow : Window
     private readonly HistoryPage _historyPage;
     private readonly SettingsPage _settingsPage;
     private readonly ConverterViewModel _converterViewModel;
+    private readonly IWindowPlacementStore _windowPlacementStore;
+    private RectInt32? _restoredBounds;
+    private uint _restoredDpi = 96;
+    private bool _persistWindowPlacement = true;
     private bool _closing;
     private bool _allowClose;
 
@@ -25,6 +31,7 @@ public sealed partial class MainWindow : Window
         HistoryPage historyPage,
         SettingsPage settingsPage,
         ConverterViewModel converterViewModel,
+        IWindowPlacementStore windowPlacementStore,
         WindowContext windowContext,
         ThemeService themeService)
     {
@@ -32,6 +39,7 @@ public sealed partial class MainWindow : Window
         _historyPage = historyPage;
         _settingsPage = settingsPage;
         _converterViewModel = converterViewModel;
+        _windowPlacementStore = windowPlacementStore;
 
         InitializeComponent();
         windowContext.Attach(this, AppRoot);
@@ -45,6 +53,7 @@ public sealed partial class MainWindow : Window
 
         RootNavigationView.SelectedItem = HomeNavigationItem;
         PageHost.Content = _homePage;
+        AppWindow.Changed += AppWindow_Changed;
         AppWindow.Closing += MainWindow_Closing;
     }
 
@@ -64,25 +73,73 @@ public sealed partial class MainWindow : Window
 
         var qaWidth = ReadPositiveEnvironmentValue("RTX_UI_QA_WIDTH");
         var qaHeight = ReadPositiveEnvironmentValue("RTX_UI_QA_HEIGHT");
-        var hasQaSize = qaWidth.HasValue && qaHeight.HasValue;
+        var hasQaSize = qaWidth.HasValue || qaHeight.HasValue;
+        _persistWindowPlacement = !hasQaSize;
+
+        var savedState = hasQaSize ? null : _windowPlacementStore.Load();
+        var savedScale = savedState is null ? 1d : dpi / (double)savedState.Dpi;
 
         var margin = Math.Max(8, (int)Math.Round(16 * scale));
-        var desiredWidth = qaWidth ?? (int)Math.Round(1440 * scale);
-        var desiredHeight = qaHeight ?? (int)Math.Round(900 * scale);
-        var width = hasQaSize ? desiredWidth : Math.Min(desiredWidth, Math.Max(640, workArea.Width - margin * 2));
-        var height = hasQaSize ? desiredHeight : Math.Min(desiredHeight, Math.Max(480, workArea.Height - margin * 2));
+        var desiredWidth = qaWidth ?? (savedState is null
+            ? (int)Math.Round(1440 * scale)
+            : (int)Math.Round(savedState.Width * savedScale));
+        var desiredHeight = qaHeight ?? (savedState is null
+            ? (int)Math.Round(900 * scale)
+            : (int)Math.Round(savedState.Height * savedScale));
+        var availableWidth = Math.Max(1, workArea.Width - margin * 2);
+        var availableHeight = Math.Max(1, workArea.Height - margin * 2);
+        var minimumWidth = Math.Min((int)Math.Round(1200 * scale), availableWidth);
+        var minimumHeight = Math.Min((int)Math.Round(756 * scale), availableHeight);
+        var width = Math.Clamp(desiredWidth, minimumWidth, availableWidth);
+        var height = Math.Clamp(desiredHeight, minimumHeight, availableHeight);
         var x = workArea.X + Math.Max(0, (workArea.Width - width) / 2);
         var y = workArea.Y + Math.Max(0, (workArea.Height - height) / 2);
 
-        AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
+        _restoredBounds = new RectInt32(x, y, width, height);
+        _restoredDpi = dpi;
+        AppWindow.MoveAndResize(_restoredBounds.Value);
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             // This is the smallest viewport in which the complete two-column workspace,
             // footer and native title bar can remain visible without clipping.
-            presenter.PreferredMinimumWidth = (int)Math.Round(1200 * scale);
-            presenter.PreferredMinimumHeight = (int)Math.Round(756 * scale);
+            presenter.PreferredMinimumWidth = minimumWidth;
+            presenter.PreferredMinimumHeight = minimumHeight;
+            if (savedState?.IsMaximized == true)
+            {
+                presenter.Maximize();
+            }
         }
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (sender.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Restored } ||
+            (!args.DidPositionChange && !args.DidSizeChange && !args.DidPresenterChange))
+        {
+            return;
+        }
+
+        _restoredBounds = new RectInt32(sender.Position.X, sender.Position.Y, sender.Size.Width, sender.Size.Height);
+        _restoredDpi = Math.Max(96u, GetDpiForWindow(WindowNative.GetWindowHandle(this)));
+    }
+
+    private void SaveWindowPlacement()
+    {
+        if (!_persistWindowPlacement || _restoredBounds is not { } bounds)
+        {
+            return;
+        }
+
+        var isMaximized = AppWindow.Presenter is OverlappedPresenter
+        {
+            State: OverlappedPresenterState.Maximized
+        };
+        _windowPlacementStore.TrySave(new WindowPlacementState(
+            bounds.Width,
+            bounds.Height,
+            checked((int)_restoredDpi),
+            isMaximized));
     }
 
     private static int? ReadPositiveEnvironmentValue(string name) =>
@@ -138,6 +195,7 @@ public sealed partial class MainWindow : Window
         }
 
         _closing = true;
+        SaveWindowPlacement();
         try
         {
             await _converterViewModel.DisposeAsync();

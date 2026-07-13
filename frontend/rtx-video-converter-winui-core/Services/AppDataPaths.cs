@@ -8,4 +8,5 @@ public static class AppDataPaths
 
     public static string History => Path.Combine(Root, "history.json");
     public static string Theme => Path.Combine(Root, "theme.txt");
+    public static string WindowPlacement => Path.Combine(Root, "window-placement.json");
 }
