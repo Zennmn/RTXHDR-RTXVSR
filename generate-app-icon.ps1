@@ -2,6 +2,7 @@ param(
     [string]$SourcePng = "",
     [string]$OutputPng = "",
     [string]$OutputIco = "",
+    [string]$VersionedIco = "",
     [ValidateRange(16, 96)]
     [int]$CornerRadius = 48
 )
@@ -19,10 +20,14 @@ if ([string]::IsNullOrWhiteSpace($OutputPng)) {
 if ([string]::IsNullOrWhiteSpace($OutputIco)) {
     $OutputIco = Join-Path $root "frontend\rtx-video-converter-winui\Assets\app-icon.ico"
 }
+if ([string]::IsNullOrWhiteSpace($VersionedIco)) {
+    $VersionedIco = Join-Path $root "frontend\rtx-video-converter-winui\Assets\app-icon-rounded-v100.ico"
+}
 
 $SourcePng = [System.IO.Path]::GetFullPath($SourcePng)
 $OutputPng = [System.IO.Path]::GetFullPath($OutputPng)
 $OutputIco = [System.IO.Path]::GetFullPath($OutputIco)
+$VersionedIco = [System.IO.Path]::GetFullPath($VersionedIco)
 if (-not (Test-Path -LiteralPath $SourcePng -PathType Leaf)) {
     throw "Source icon was not found: $SourcePng"
 }
@@ -175,10 +180,12 @@ finally {
     $stream.Dispose()
 }
 Move-Item -LiteralPath $temporaryIco -Destination $OutputIco -Force
+Copy-Item -LiteralPath $OutputIco -Destination $VersionedIco -Force
 
 [pscustomobject]@{
     Png = $OutputPng
     Ico = $OutputIco
+    VersionedIco = $VersionedIco
     CornerRadius = $CornerRadius
     IcoFrames = $frames.Count
 }

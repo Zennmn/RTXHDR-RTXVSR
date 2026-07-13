@@ -12,6 +12,7 @@
 #define AppPublisher "Zennmn"
 #define AppURL "https://github.com/Zennmn/RTXHDR-RTXVSR"
 #define AppExeName "RTXVideoConverter.WinUI.exe"
+#define AppIconName "app-icon-rounded-v100.ico"
 
 [Setup]
 AppId={{5A8CB3EE-36AF-489C-987D-68AC18A81843}
@@ -26,7 +27,7 @@ VersionInfoVersion={#AppVersion}.0
 VersionInfoProductVersion={#AppVersion}.0
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
-UninstallDisplayIcon={app}\Assets\app-icon.ico
+UninstallDisplayIcon={app}\Assets\{#AppIconName}
 LicenseFile={#SourceDir}\DISTRIBUTION_TERMS.txt
 SetupIconFile=..\frontend\rtx-video-converter-winui\Assets\app-icon.ico
 OutputDir={#OutputDir}
@@ -53,8 +54,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\{#AppIconName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\Assets\{#AppIconName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "启动 {#AppName}"; Flags: nowait postinstall skipifsilent
