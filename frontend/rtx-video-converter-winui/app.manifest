@@ -2,7 +2,7 @@
 <assembly manifestVersion="1.0"
           xmlns="urn:schemas-microsoft-com:asm.v1"
           xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity version="1.0.0.0" name="RTXVideoConverter.WinUI.app"/>
+  <assemblyIdentity version="1.0.1.0" name="RTXVideoConverter.WinUI.app"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>

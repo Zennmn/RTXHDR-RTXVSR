@@ -1,5 +1,5 @@
 param(
-    [string]$ImageName = "rtx-video-converter-ffmpeg:1.0.0"
+    [string]$ImageName = "rtx-video-converter-ffmpeg:1.0.1"
 )
 
 $ErrorActionPreference = "Stop"

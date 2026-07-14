@@ -1,11 +1,11 @@
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\artifacts\release-v1.0.0\RTX Video Converter"
+  #define SourceDir "..\artifacts\release-v1.0.1\RTX Video Converter"
 #endif
 #ifndef OutputDir
-  #define OutputDir "..\dist\v1.0.0"
+  #define OutputDir "..\dist\v1.0.1"
 #endif
 
 #define AppName "RTX Video Converter"

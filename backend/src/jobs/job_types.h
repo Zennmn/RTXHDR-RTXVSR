@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/result.h"
+#include "core/utf8_path.h"
 
 #include <algorithm>
 #include <atomic>
@@ -101,7 +102,7 @@ struct CancellationToken {
 };
 
 inline std::string normalized_path_key(std::string path) {
-    std::filesystem::path normalized(path);
+    std::filesystem::path normalized = path_from_utf8(path);
     std::error_code error;
     const auto absolute = std::filesystem::absolute(normalized, error);
     if (!error) {
@@ -109,7 +110,7 @@ inline std::string normalized_path_key(std::string path) {
     }
     normalized = normalized.lexically_normal();
 
-    std::string key = normalized.string();
+    std::string key = path_to_utf8(normalized);
     std::replace(key.begin(), key.end(), '/', '\\');
     std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));

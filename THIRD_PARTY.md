@@ -22,11 +22,11 @@ Reference:
 ## FFmpeg
 
 - This repository does not vendor FFmpeg source code or binaries into git.
-- Release 1.0.0 bundles unmodified FFmpeg shared libraries built from commit `a09be9b91e8e1219f297586873b0d7322b47df96`.
+- Release 1.0.1 bundles unmodified FFmpeg shared libraries built from commit `a09be9b91e8e1219f297586873b0d7322b47df96`.
 - The build uses only FFmpeg's built-in LGPL code plus MIT-licensed `nv-codec-headers` commit `15ee32753c92faddbabbff11676779618fc6db7e`.
 - GPL, nonfree, libx264, libx265, and other optional third-party codec libraries are not enabled.
 - The reproducible recipe is `third_party/ffmpeg/Dockerfile`; `build-minimal-ffmpeg.ps1` produces the exact source archives and complete configure log.
-- The corresponding-source archive is published beside each binary release. For v1.0.0 it is `RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip`.
+- The corresponding-source archive is published beside each binary release. For v1.0.1 it is `RTX.Video.Converter_1.0.1_FFmpeg-corresponding-source.zip`.
 - The application dynamically links to these DLLs. Users may replace them with ABI-compatible modified FFmpeg builds.
 
 Release builders must keep the pinned LGPL-compatible recipe and follow FFmpeg's distribution checklist, including:

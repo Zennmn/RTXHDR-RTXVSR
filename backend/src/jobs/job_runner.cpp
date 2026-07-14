@@ -53,6 +53,12 @@ Result<void> JobRunner::run_one(const std::string& id) {
         *cancellation,
         [this, &id](const JobProgress& progress) {
             store_.update_progress(id, progress);
+        },
+        [this, &id](const std::string& warning) {
+            const auto added = store_.add_warning(id, warning);
+            if (!added.ok()) {
+                log_error("Job " + id + " could not record warning: " + describe_error(added.error()));
+            }
         });
 
     if (result.ok()) {

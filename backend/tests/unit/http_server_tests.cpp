@@ -163,7 +163,7 @@ TEST(HttpServer, healthRequiresButDoesNotDiscloseAppSessionIdWhenConfigured) {
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 200);
     const auto body = nlohmann::json::parse(response->body);
-    EXPECT_EQ(body.at("version"), "1.0.0");
+    EXPECT_EQ(body.at("version"), "1.0.1");
     EXPECT_EQ(body.at("ready"), true);
     EXPECT_FALSE(body.contains("appSessionId"));
 }

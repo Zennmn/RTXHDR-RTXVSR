@@ -27,13 +27,13 @@ X-App-Session-Id: <opaque-session-id>
 Response:
 
 ```json
-{ "version": "1.0.0", "ready": true }
+{ "version": "1.0.1", "ready": true }
 ```
 
 When launched with `--app-session-id`, health includes the owner session:
 
 ```json
-{ "version": "1.0.0", "ready": true }
+{ "version": "1.0.1", "ready": true }
 ```
 
 A successful authenticated health response proves ownership; the backend deliberately does not echo the secret.

@@ -12,7 +12,11 @@ enum class FakePipelineMode {
 class FakePipeline final : public VideoPipeline {
 public:
     explicit FakePipeline(FakePipelineMode mode);
-    Result<void> run(const TranscodeRequest& request, CancellationToken& cancellation, ProgressCallback progress) override;
+    Result<void> run(
+        const TranscodeRequest& request,
+        CancellationToken& cancellation,
+        ProgressCallback progress,
+        WarningCallback warning) override;
 
 private:
     FakePipelineMode mode_;

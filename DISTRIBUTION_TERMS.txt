@@ -1,4 +1,4 @@
-RTX Video Converter 1.0.0 - Distribution Terms and Notices
+RTX Video Converter 1.0.1 - Distribution Terms and Notices
 ============================================================
 
 Please read this document before installing, using, or redistributing this
@@ -29,7 +29,7 @@ Exact nv-codec-headers revision:
 The complete corresponding source, build configuration, and reproducible
 Docker build recipe are published beside the binaries at:
 
-  https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip
+  https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.1/RTX.Video.Converter_1.0.1_FFmpeg-corresponding-source.zip
 
 FFmpeg source and licensing information:
   https://ffmpeg.org/
