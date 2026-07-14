@@ -1,11 +1,14 @@
 #include "video/ffmpeg/ffmpeg_transcode_pipeline.h"
+#include "video/ffmpeg/ffmpeg_stream_utils.h"
 
 #include "platform/logging.h"
 
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iomanip>
 #include <limits>
@@ -32,6 +35,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/rational.h>
 }
@@ -41,6 +45,68 @@ extern "C" {
 #endif
 
 namespace vsr {
+
+bool ffmpeg_muxer_supports_copy(const AVOutputFormat* format, int codec_id) {
+    if (format == nullptr || codec_id == AV_CODEC_ID_NONE) {
+        return false;
+    }
+    return avformat_query_codec(
+               format,
+               static_cast<AVCodecID>(codec_id),
+               FF_COMPLIANCE_NORMAL) > 0;
+}
+
+Result<void> ffmpeg_copy_display_matrix(
+    const AVCodecParameters* source,
+    AVCodecParameters* destination) {
+    if (source == nullptr || destination == nullptr) {
+        return Result<void>::Fail({
+            "display_matrix_copy_failed",
+            "FFmpeg could not copy the input display matrix.",
+            "Source or destination codec parameters were null."
+        });
+    }
+    if (source == destination) {
+        return Result<void>::Ok();
+    }
+
+    const AVPacketSideData* source_matrix = av_packet_side_data_get(
+        source->coded_side_data,
+        source->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX);
+    if (source_matrix == nullptr) {
+        return Result<void>::Ok();
+    }
+    constexpr std::size_t display_matrix_size = 9 * sizeof(std::int32_t);
+    if (source_matrix->data == nullptr || source_matrix->size != display_matrix_size) {
+        return Result<void>::Fail({
+            "display_matrix_copy_failed",
+            "FFmpeg could not copy the input display matrix.",
+            "The input display matrix had an invalid size: " + std::to_string(source_matrix->size) + "."
+        });
+    }
+
+    av_packet_side_data_remove(
+        destination->coded_side_data,
+        &destination->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX);
+    AVPacketSideData* destination_matrix = av_packet_side_data_new(
+        &destination->coded_side_data,
+        &destination->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX,
+        source_matrix->size,
+        0);
+    if (destination_matrix == nullptr) {
+        return Result<void>::Fail({
+            "display_matrix_copy_failed",
+            "FFmpeg could not copy the input display matrix.",
+            "Could not allocate " + std::to_string(source_matrix->size) + " bytes of side data."
+        });
+    }
+    std::memcpy(destination_matrix->data, source_matrix->data, source_matrix->size);
+    return Result<void>::Ok();
+}
+
 namespace {
 
 struct InputFormatContextDeleter {
@@ -225,23 +291,6 @@ bool valid_rational(AVRational value) {
     return value.num > 0 && value.den > 0;
 }
 
-bool mp4_audio_copy_compatible(AVCodecID codec_id) {
-    switch (codec_id) {
-    case AV_CODEC_ID_AAC:
-    case AV_CODEC_ID_ALAC:
-    case AV_CODEC_ID_MP3:
-    case AV_CODEC_ID_AC3:
-    case AV_CODEC_ID_EAC3:
-        return true;
-    default:
-        return false;
-    }
-}
-
-bool mp4_subtitle_copy_compatible(AVCodecID codec_id) {
-    return codec_id == AV_CODEC_ID_MOV_TEXT;
-}
-
 std::string codec_details(const AVStream* stream) {
     if (stream == nullptr || stream->codecpar == nullptr) {
         return "unknown stream";
@@ -375,12 +424,44 @@ Result<BufferRefPtr> create_ffmpeg_d3d11_device(ID3D11Device* device, ID3D11Devi
     return Result<BufferRefPtr>::Ok(std::move(device_ref));
 }
 
-DXGI_FORMAT dxgi_format_for_rtx_surface(bool hdr_enabled) {
-    return hdr_enabled ? DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+int decoder_pixel_depth(const AVCodecContext* decoder) {
+    if (decoder == nullptr) {
+        return 8;
+    }
+
+    const AVPixelFormat formats[] = {
+        decoder->sw_pix_fmt,
+        decoder->pix_fmt
+    };
+    for (const AVPixelFormat format : formats) {
+        const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(format);
+        if (descriptor != nullptr && descriptor->nb_components > 0) {
+            return descriptor->comp[0].depth;
+        }
+    }
+    return 8;
+}
+
+DXGI_FORMAT dxgi_format_for_rtx_input_surface(const AVCodecContext* decoder) {
+    // Match NVIDIA's TrueHDR sample: the NGX input surface follows the source
+    // bit depth, independently of whether TrueHDR is enabled. Promoting an
+    // 8-bit SDR source to packed RGB10 before NGX corrupts its channel layout
+    // on the affected driver path.
+    return decoder_pixel_depth(decoder) > 8
+        ? DXGI_FORMAT_R10G10B10A2_UNORM
+        : DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
+DXGI_FORMAT dxgi_format_for_rtx_output_surface(const AVCodecContext* decoder, bool hdr_enabled) {
+    return hdr_enabled || decoder_pixel_depth(decoder) > 8
+        ? DXGI_FORMAT_R10G10B10A2_UNORM
+        : DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
 DXGI_FORMAT dxgi_format_for_encoder_surface(AVPixelFormat format) {
     switch (format) {
+    case AV_PIX_FMT_X2BGR10:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
     case AV_PIX_FMT_NV12:
         return DXGI_FORMAT_NV12;
     case AV_PIX_FMT_P010LE:
@@ -715,10 +796,18 @@ FfmpegTranscodePipeline::FfmpegTranscodePipeline(std::unique_ptr<RtxProcessor> r
 Result<void> FfmpegTranscodePipeline::run(
     const TranscodeRequest& request,
     CancellationToken& cancellation,
-    ProgressCallback progress) {
+    ProgressCallback progress,
+    WarningCallback warning) {
     log_info("FFmpeg pipeline starting: " + request.input_path + " -> " + request.output_path);
+    const auto report_warning = [&warning](const std::string& message) {
+        log_info("FFmpeg pipeline warning: " + message);
+        if (warning) {
+            warning(message);
+        }
+    };
+    const std::filesystem::path input_path = path_from_utf8(request.input_path);
     std::error_code input_status_error;
-    const bool input_exists = std::filesystem::exists(request.input_path, input_status_error);
+    const bool input_exists = std::filesystem::exists(input_path, input_status_error);
     if (input_status_error) {
         return Result<void>::Fail({
             "input_access_failed",
@@ -729,7 +818,7 @@ Result<void> FfmpegTranscodePipeline::run(
     if (!input_exists) {
         return Result<void>::Fail({"input_not_found", "Input file does not exist.", request.input_path});
     }
-    const std::filesystem::path final_output_path(request.output_path);
+    const std::filesystem::path final_output_path = path_from_utf8(request.output_path);
     const auto output_target = ffmpeg_validate_output_target(final_output_path);
     if (!output_target.ok()) {
         return Result<void>::Fail(output_target.error());
@@ -855,7 +944,7 @@ Result<void> FfmpegTranscodePipeline::run(
     }
 
     AVFormatContext* raw_output = nullptr;
-    const std::string temporary_output_string = temporary_output_path.string();
+    const std::string temporary_output_string = path_to_utf8(temporary_output_path);
     result = avformat_alloc_output_context2(&raw_output, nullptr, "mp4", temporary_output_string.c_str());
     if (result < 0 || raw_output == nullptr) {
         return Result<void>::Fail(result < 0
@@ -880,9 +969,13 @@ Result<void> FfmpegTranscodePipeline::run(
     const double scale = request.processing.vsr.enabled ? request.processing.vsr.scale : 1.0;
     const int output_width = even_scaled_dimension(decoder_context->width, scale);
     const int output_height = even_scaled_dimension(decoder_context->height, scale);
-    const AVPixelFormat encoder_sw_format = hdr_enabled ? AV_PIX_FMT_P010LE : AV_PIX_FMT_NV12;
+    // Keep TrueHDR's packed RGB10 output intact. NVENC accepts X2BGR10
+    // directly; an extra D3D11 VideoProcessor RGB10 -> P010 pass corrupts
+    // chroma on the affected driver path.
+    const AVPixelFormat encoder_sw_format = hdr_enabled ? AV_PIX_FMT_X2BGR10 : AV_PIX_FMT_NV12;
     const DXGI_FORMAT encoder_dxgi_format = dxgi_format_for_encoder_surface(encoder_sw_format);
-    const DXGI_FORMAT rtx_dxgi_format = dxgi_format_for_rtx_surface(hdr_enabled);
+    const DXGI_FORMAT rtx_input_dxgi_format = dxgi_format_for_rtx_input_surface(decoder_context.get());
+    const DXGI_FORMAT rtx_output_dxgi_format = dxgi_format_for_rtx_output_surface(decoder_context.get(), hdr_enabled);
     if (encoder_dxgi_format == DXGI_FORMAT_UNKNOWN) {
         return Result<void>::Fail({"encoder_format_unsupported", "The requested encoder texture format is not supported.", ""});
     }
@@ -986,6 +1079,12 @@ Result<void> FfmpegTranscodePipeline::run(
             "FFmpeg could not copy encoder parameters to the output stream.",
             result));
     }
+    const auto display_matrix_copied = ffmpeg_copy_display_matrix(
+        input_stream->codecpar,
+        output_stream->codecpar);
+    if (!display_matrix_copied.ok()) {
+        return Result<void>::Fail(display_matrix_copied.error());
+    }
 
     struct CopiedStream {
         AVStream* output_stream = nullptr;
@@ -1007,23 +1106,19 @@ Result<void> FfmpegTranscodePipeline::run(
                 if (request.output.audio_mode != "copy") {
                     continue;
                 }
-                if (!mp4_audio_copy_compatible(source_stream->codecpar->codec_id)) {
-                    return Result<void>::Fail({
-                        "unsupported_mp4_stream",
-                        "Audio stream cannot be copied into MP4 output.",
-                        codec_details(source_stream)
-                    });
+                if (!ffmpeg_muxer_supports_copy(output->oformat, source_stream->codecpar->codec_id)) {
+                    report_warning(
+                        "Skipped MP4-incompatible audio stream (" + codec_details(source_stream) + ").");
+                    continue;
                 }
             } else if (media_type == AVMEDIA_TYPE_SUBTITLE) {
                 if (request.output.subtitle_mode != "copy-compatible") {
                     continue;
                 }
-                if (!mp4_subtitle_copy_compatible(source_stream->codecpar->codec_id)) {
-                    return Result<void>::Fail({
-                        "unsupported_mp4_stream",
-                        "Subtitle stream cannot be copied into MP4 output.",
-                        codec_details(source_stream)
-                    });
+                if (!ffmpeg_muxer_supports_copy(output->oformat, source_stream->codecpar->codec_id)) {
+                    report_warning(
+                        "Skipped MP4-incompatible subtitle stream (" + codec_details(source_stream) + ").");
+                    continue;
                 }
             } else {
                 continue;
@@ -1153,7 +1248,7 @@ Result<void> FfmpegTranscodePipeline::run(
                     d3d11.value().device.Get(),
                     decoder_context->width,
                     decoder_context->height,
-                    rtx_dxgi_format,
+                    rtx_input_dxgi_format,
                     D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
                     rtx_input_textures[index]);
                 if (!created.ok()) {
@@ -1163,7 +1258,7 @@ Result<void> FfmpegTranscodePipeline::run(
                     d3d11.value().device.Get(),
                     output_width,
                     output_height,
-                    rtx_dxgi_format,
+                    rtx_output_dxgi_format,
                     D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
                     rtx_output_textures[index]);
                 if (!output_created.ok()) {
@@ -1222,7 +1317,7 @@ Result<void> FfmpegTranscodePipeline::run(
             });
         }
 
-        if (!rtx_to_encoder_converter_initialized) {
+        if (!hdr_enabled && !rtx_to_encoder_converter_initialized) {
             const auto converter_initialized = rtx_to_encoder_converter.initialize(
                 d3d11.value().device.Get(),
                 d3d11.value().context.Get(),
@@ -1254,13 +1349,25 @@ Result<void> FfmpegTranscodePipeline::run(
             return Result<void>::Fail(processed.error());
         }
 
-        const auto encoder_converted = rtx_to_encoder_converter.convert(
-            rtx_output_texture.Get(),
-            0,
-            output_texture,
-            output_slice);
-        if (!encoder_converted.ok()) {
-            return Result<void>::Fail(encoder_converted.error());
+        if (hdr_enabled) {
+            d3d11.value().context->CopySubresourceRegion(
+                output_texture,
+                D3D11CalcSubresource(0, output_slice, 1),
+                0,
+                0,
+                0,
+                rtx_output_texture.Get(),
+                0,
+                nullptr);
+        } else {
+            const auto encoder_converted = rtx_to_encoder_converter.convert(
+                rtx_output_texture.Get(),
+                0,
+                output_texture,
+                output_slice);
+            if (!encoder_converted.ok()) {
+                return Result<void>::Fail(encoder_converted.error());
+            }
         }
 
         encoder_frame->pts = frame->pts == AV_NOPTS_VALUE

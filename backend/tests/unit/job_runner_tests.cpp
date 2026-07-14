@@ -25,7 +25,11 @@ TranscodeRequest valid_request() {
 
 class SpyPipeline final : public VideoPipeline {
 public:
-    Result<void> run(const TranscodeRequest& request, CancellationToken&, ProgressCallback progress) override {
+    Result<void> run(
+        const TranscodeRequest& request,
+        CancellationToken&,
+        ProgressCallback progress,
+        WarningCallback) override {
         called = true;
         observed_request = request;
 
@@ -45,7 +49,7 @@ public:
 
 class CountingPipeline final : public VideoPipeline {
 public:
-    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback) override {
+    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback, WarningCallback) override {
         ++calls;
         return Result<void>::Ok();
     }
@@ -57,7 +61,11 @@ class CancelBeforeSuccessPipeline final : public VideoPipeline {
 public:
     explicit CancelBeforeSuccessPipeline(std::function<void()> cancel) : cancel_(std::move(cancel)) {}
 
-    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback progress) override {
+    Result<void> run(
+        const TranscodeRequest&,
+        CancellationToken&,
+        ProgressCallback progress,
+        WarningCallback) override {
         JobProgress snapshot;
         snapshot.stage = JobStage::encoding;
         snapshot.progress = 0.5;
@@ -75,7 +83,11 @@ public:
     ConcurrentProbePipeline(std::atomic<int>& active, std::atomic<int>& max_active)
         : active_(active), max_active_(max_active) {}
 
-    Result<void> run(const TranscodeRequest&, CancellationToken&, ProgressCallback progress) override {
+    Result<void> run(
+        const TranscodeRequest&,
+        CancellationToken&,
+        ProgressCallback progress,
+        WarningCallback) override {
         const int active = active_.fetch_add(1) + 1;
         record_max(active);
 
@@ -104,7 +116,11 @@ class WaitForCancelPipeline final : public VideoPipeline {
 public:
     std::future<void> started() { return started_.get_future(); }
 
-    Result<void> run(const TranscodeRequest&, CancellationToken& cancellation, ProgressCallback) override {
+    Result<void> run(
+        const TranscodeRequest&,
+        CancellationToken& cancellation,
+        ProgressCallback,
+        WarningCallback) override {
         started_.set_value();
         for (int i = 0; i < 1000; ++i) {
             if (cancellation.requested.load()) {
@@ -123,6 +139,18 @@ private:
     std::promise<void> started_;
 };
 
+class WarningPipeline final : public VideoPipeline {
+public:
+    Result<void> run(
+        const TranscodeRequest&,
+        CancellationToken&,
+        ProgressCallback,
+        WarningCallback warning) override {
+        warning("Skipped MP4-incompatible audio stream (stream=1, codec=dts).");
+        return Result<void>::Ok();
+    }
+};
+
 } // namespace
 
 TEST(JobRunner, completesFakePipelineJob) {
@@ -139,6 +167,20 @@ TEST(JobRunner, completesFakePipelineJob) {
     EXPECT_EQ(snapshot.state, JobState::succeeded);
     EXPECT_DOUBLE_EQ(snapshot.progress.progress, 1.0);
     EXPECT_EQ(snapshot.progress.frames_total, 100);
+}
+
+TEST(JobRunner, recordsPipelineWarningsOnSuccessfulJob) {
+    JobStore store;
+    auto pipeline = std::make_unique<WarningPipeline>();
+    JobRunner runner(store, std::move(pipeline));
+    const auto id = store.create(valid_request()).value();
+
+    const auto result = runner.run_one(id);
+
+    ASSERT_TRUE(result.ok()) << result.error().message;
+    const auto snapshot = store.get(id).value();
+    ASSERT_EQ(snapshot.warnings.size(), 1u);
+    EXPECT_EQ(snapshot.warnings.front(), "Skipped MP4-incompatible audio stream (stream=1, codec=dts).");
 }
 
 TEST(JobRunner, recordsFakePipelineFailure) {

@@ -1,5 +1,7 @@
 #include "video/media_probe_service.h"
 
+#include "core/utf8_path.h"
+
 #if defined(VSR_ENABLE_FFMPEG)
 #include "video/ffmpeg/ffmpeg_probe.h"
 #endif
@@ -34,7 +36,7 @@ Result<MediaProbeSummary> probe_media_for_ui(const std::string& path) {
         return Result<MediaProbeSummary>::Fail({"input_path_required", "Input path is required.", ""});
     }
 
-    std::filesystem::path input(path);
+    const std::filesystem::path input = path_from_utf8(path);
     std::error_code error;
     if (!std::filesystem::exists(input, error)) {
         return Result<MediaProbeSummary>::Fail({"input_not_found", "Input file was not found.", path});
@@ -45,7 +47,7 @@ Result<MediaProbeSummary> probe_media_for_ui(const std::string& path) {
 
     MediaProbeSummary summary;
     summary.path = path;
-    summary.name = input.filename().string();
+    summary.name = path_to_utf8(input.filename());
 
     error.clear();
     const auto size = std::filesystem::file_size(input, error);

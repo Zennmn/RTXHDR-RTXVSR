@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/utf8_path.h"
 #include "video/rtx/rtx_processor.h"
 #include "video/video_pipeline.h"
 
@@ -96,7 +97,8 @@ inline std::int64_t ffmpeg_recommended_nvenc_bitrate(
 
 inline std::filesystem::path ffmpeg_temporary_output_path(const std::filesystem::path& final_output) {
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto filename = final_output.filename().string() + ".vsr-" + std::to_string(stamp) + ".tmp";
+    auto filename = final_output.filename();
+    filename += path_from_utf8(".vsr-" + std::to_string(stamp) + ".tmp");
     return final_output.parent_path() / filename;
 }
 
@@ -109,11 +111,11 @@ inline Result<void> ffmpeg_validate_output_target(const std::filesystem::path& f
             return Result<void>::Fail({
                 "output_directory_access_failed",
                 "Output directory could not be checked.",
-                parent.string() + ": " + directory_error.message()
+                path_to_utf8(parent) + ": " + directory_error.message()
             });
         }
         if (!directory_exists) {
-            return Result<void>::Fail({"output_directory_missing", "Output directory does not exist.", parent.string()});
+            return Result<void>::Fail({"output_directory_missing", "Output directory does not exist.", path_to_utf8(parent)});
         }
         std::error_code type_error;
         const bool is_directory = std::filesystem::is_directory(parent, type_error);
@@ -121,11 +123,11 @@ inline Result<void> ffmpeg_validate_output_target(const std::filesystem::path& f
             return Result<void>::Fail({
                 "output_directory_access_failed",
                 "Output directory could not be checked.",
-                parent.string() + ": " + type_error.message()
+                path_to_utf8(parent) + ": " + type_error.message()
             });
         }
         if (!is_directory) {
-            return Result<void>::Fail({"output_directory_missing", "Output target parent is not a directory.", parent.string()});
+            return Result<void>::Fail({"output_directory_missing", "Output target parent is not a directory.", path_to_utf8(parent)});
         }
     }
 
@@ -135,11 +137,11 @@ inline Result<void> ffmpeg_validate_output_target(const std::filesystem::path& f
         return Result<void>::Fail({
             "output_access_failed",
             "Output file could not be checked.",
-            final_output.string() + ": " + output_error.message()
+            path_to_utf8(final_output) + ": " + output_error.message()
         });
     }
     if (output_exists) {
-        return Result<void>::Fail({"output_file_exists", "Output file already exists.", final_output.string()});
+        return Result<void>::Fail({"output_file_exists", "Output file already exists.", path_to_utf8(final_output)});
     }
 
     return Result<void>::Ok();
@@ -157,7 +159,7 @@ inline Result<void> ffmpeg_replace_output_file(const std::filesystem::path& temp
         return Result<void>::Fail({
             "output_replace_failed",
             "Temporary output could not be moved into place.",
-            temporary_output.string() + " -> " + final_output.string() + ": " + rename_error.message()
+            path_to_utf8(temporary_output) + " -> " + path_to_utf8(final_output) + ": " + rename_error.message()
         });
     }
 
@@ -167,7 +169,11 @@ inline Result<void> ffmpeg_replace_output_file(const std::filesystem::path& temp
 class FfmpegTranscodePipeline final : public VideoPipeline {
 public:
     explicit FfmpegTranscodePipeline(std::unique_ptr<RtxProcessor> rtx);
-    Result<void> run(const TranscodeRequest& request, CancellationToken& cancellation, ProgressCallback progress) override;
+    Result<void> run(
+        const TranscodeRequest& request,
+        CancellationToken& cancellation,
+        ProgressCallback progress,
+        WarningCallback warning) override;
 
 private:
     std::unique_ptr<RtxProcessor> rtx_;

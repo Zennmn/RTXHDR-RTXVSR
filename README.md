@@ -4,10 +4,10 @@
 
 ## 下载
 
-- 安装版：[RTX.Video.Converter_1.0.0_x64-setup.exe](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-setup.exe)
-- 便携版：[RTX.Video.Converter_1.0.0_x64-portable.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_x64-portable.zip)
-- FFmpeg 完整对应源码与构建配置：[RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/RTX.Video.Converter_1.0.0_FFmpeg-corresponding-source.zip)
-- 校验文件：[SHA256SUMS.txt](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.0/SHA256SUMS.txt)
+- 安装版：[RTX.Video.Converter_1.0.1_x64-setup.exe](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.1/RTX.Video.Converter_1.0.1_x64-setup.exe)
+- 便携版：[RTX.Video.Converter_1.0.1_x64-portable.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.1/RTX.Video.Converter_1.0.1_x64-portable.zip)
+- FFmpeg 完整对应源码与构建配置：[RTX.Video.Converter_1.0.1_FFmpeg-corresponding-source.zip](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.1/RTX.Video.Converter_1.0.1_FFmpeg-corresponding-source.zip)
+- 校验文件：[SHA256SUMS.txt](https://github.com/Zennmn/RTXHDR-RTXVSR/releases/download/v1.0.1/SHA256SUMS.txt)
 
 安装版与便携版包含动态链接的 FFmpeg LGPL 共享库以及受 NVIDIA 独立条款约束的 RTX Video SDK 材料。安装、使用或再分发前请阅读包内 `DISTRIBUTION_TERMS.txt`；完整的 .NET、Windows App SDK、NuGet 与 C++ 依赖声明收录在 `THIRD_PARTY_NOTICES.txt` 和 `THIRD_PARTY_LICENSES/`，本项目 MIT 许可证不覆盖这些第三方组件。
 
@@ -73,7 +73,7 @@ cmake --build build\backend-hw --target vsr_backend --config Release
 .\build-winui.ps1 -Publish -BackendExe .\build\backend-hw\Release\vsr_backend.exe
 
 # 从上述发布目录生成便携版与 Inno Setup 安装版
-.\package-release.ps1 -Version 1.0.0
+.\package-release.ps1 -Version 1.0.1
 ```
 
 

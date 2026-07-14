@@ -161,6 +161,26 @@ Result<void> JobStore::update_progress(const std::string& id, const JobProgress&
     return Result<void>::Ok();
 }
 
+Result<void> JobStore::add_warning(const std::string& id, const std::string& warning) {
+    std::lock_guard lock(mutex_);
+    auto it = jobs_.find(id);
+    if (it == jobs_.end()) {
+        return Result<void>::Fail(job_not_found(id));
+    }
+    auto& snapshot = it->second.snapshot;
+    if (is_terminal(snapshot.state)) {
+        return Result<void>::Fail(job_already_finished(id));
+    }
+    if (snapshot.state != JobState::running && snapshot.state != JobState::canceling) {
+        return Result<void>::Fail(job_invalid_transition(id));
+    }
+    if (!warning.empty()) {
+        snapshot.warnings.push_back(warning);
+        touch(snapshot);
+    }
+    return Result<void>::Ok();
+}
+
 Result<void> JobStore::mark_succeeded(const std::string& id) {
     std::lock_guard lock(mutex_);
     auto it = jobs_.find(id);

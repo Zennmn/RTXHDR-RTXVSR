@@ -1,6 +1,6 @@
 {
   "name": "rtx-video-backend",
-  "version-string": "1.0.0",
+  "version-string": "1.0.1",
   "dependencies": [
     "cpp-httplib",
     "nlohmann-json",

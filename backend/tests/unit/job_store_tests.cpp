@@ -188,6 +188,20 @@ TEST(JobStore, terminalFailedJobIsImmutableForStateMutations) {
     EXPECT_DOUBLE_EQ(snapshot.progress.progress, 0.0);
 }
 
+TEST(JobStore, keepsWarningsAcrossSuccessfulCompletion) {
+    JobStore store;
+    const auto id = store.create(valid_request()).value();
+    ASSERT_TRUE(store.mark_running(id).ok());
+
+    ASSERT_TRUE(store.add_warning(id, "Skipped incompatible stream 1.").ok());
+    ASSERT_TRUE(store.mark_succeeded(id).ok());
+
+    const auto snapshot = store.get(id).value();
+    ASSERT_EQ(snapshot.warnings.size(), 1u);
+    EXPECT_EQ(snapshot.warnings.front(), "Skipped incompatible stream 1.");
+    EXPECT_FALSE(store.add_warning(id, "late warning").ok());
+}
+
 TEST(JobStore, terminalCanceledJobIsImmutableForStateMutations) {
     JobStore store;
     const auto id = store.create(valid_request()).value();

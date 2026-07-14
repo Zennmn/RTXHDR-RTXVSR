@@ -61,6 +61,19 @@ TEST(JobRequestValidation, rejectsCaseInsensitiveEquivalentInputAndOutputPath) {
     EXPECT_EQ(result.error().code, "output_path_matches_input_path");
 }
 
+TEST(JobRequestValidation, rejectsEquivalentUtf8InputAndOutputPath) {
+    const std::string utf8_directory = "\xE8\xA7\x86\xE9\xA2\x91-\xF0\x9F\x8E\xAC";
+    TranscodeRequest request;
+    request.input_path = "C:\\" + utf8_directory + "\\Input.mp4";
+    request.output_path = "c:\\" + utf8_directory + "\\.\\INPUT.mp4";
+    request.processing.vsr.enabled = true;
+
+    const auto result = validate_request(request);
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error().code, "output_path_matches_input_path");
+}
+
 TEST(JobRequestValidation, acceptsVsrHdrMp4Request) {
     TranscodeRequest request;
     request.input_path = "C:\\Videos\\in.mp4";

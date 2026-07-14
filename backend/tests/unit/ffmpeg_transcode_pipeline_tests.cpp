@@ -1,12 +1,27 @@
 #include "video/ffmpeg/ffmpeg_transcode_pipeline.h"
 
+#if defined(VSR_ENABLE_FFMPEG)
+#include "video/ffmpeg/ffmpeg_stream_utils.h"
+#endif
+
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <system_error>
+
+#if defined(VSR_ENABLE_FFMPEG)
+extern "C" {
+#include <libavcodec/codec_par.h>
+#include <libavcodec/packet.h>
+#include <libavformat/avformat.h>
+}
+#endif
 
 namespace {
 
@@ -167,3 +182,108 @@ TEST(FfmpegTranscodePipelineOutput, replacesFinalOutputWithTemporaryOutput) {
 
     std::filesystem::remove_all(directory, ignored);
 }
+
+TEST(FfmpegTranscodePipelineOutput, preservesUtf8NamesAcrossTemporaryAndFinalOutputPaths) {
+    const std::string utf8_directory_name = "\xE8\xBE\x93\xE5\x87\xBA-\xF0\x9F\x98\x80";
+    const std::string utf8_filename = "\xE5\xBD\xB1\xE7\x89\x87-\xF0\x9F\x8E\xAC.mp4";
+    const auto directory = unique_ffmpeg_test_path("utf8") / vsr::path_from_utf8(utf8_directory_name);
+    const auto final_output = directory / vsr::path_from_utf8(utf8_filename);
+    const auto temporary_output = vsr::ffmpeg_temporary_output_path(final_output);
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+    std::filesystem::create_directories(directory);
+    {
+        std::ofstream file(temporary_output, std::ios::binary);
+        ASSERT_TRUE(file);
+        file << "encoded";
+    }
+
+    EXPECT_EQ(vsr::path_to_utf8(final_output.filename()), utf8_filename);
+    EXPECT_EQ(temporary_output.parent_path(), final_output.parent_path());
+    EXPECT_NE(vsr::path_to_utf8(temporary_output.filename()).find(utf8_filename), std::string::npos);
+
+    const auto result = vsr::ffmpeg_replace_output_file(temporary_output, final_output);
+
+    ASSERT_TRUE(result.ok()) << result.error().message;
+    EXPECT_TRUE(std::filesystem::exists(final_output));
+    EXPECT_FALSE(std::filesystem::exists(temporary_output));
+    std::filesystem::remove_all(directory, ignored);
+}
+
+#if defined(VSR_ENABLE_FFMPEG)
+
+TEST(FfmpegTranscodePipelineOutput, writesUtf8OutputPathThroughFfmpegAvio) {
+    const std::string utf8_directory_name = "avio-\xE8\xBE\x93\xE5\x87\xBA-\xF0\x9F\x98\x80";
+    const std::string utf8_filename = "\xE5\xBD\xB1\xE7\x89\x87-\xF0\x9F\x8E\xAC.tmp";
+    const auto directory = unique_ffmpeg_test_path("avio_utf8") / vsr::path_from_utf8(utf8_directory_name);
+    const auto output_path = directory / vsr::path_from_utf8(utf8_filename);
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+    std::filesystem::create_directories(directory);
+
+    AVIOContext* output = nullptr;
+    const std::string ffmpeg_path = vsr::path_to_utf8(output_path);
+    const int opened = avio_open(&output, ffmpeg_path.c_str(), AVIO_FLAG_WRITE);
+    EXPECT_GE(opened, 0);
+    if (opened >= 0) {
+        const std::array<unsigned char, 4> contents = {'u', 't', 'f', '8'};
+        avio_write(output, contents.data(), static_cast<int>(contents.size()));
+        EXPECT_GE(avio_closep(&output), 0);
+    }
+
+    std::error_code size_error;
+    EXPECT_EQ(std::filesystem::file_size(output_path, size_error), 4);
+    EXPECT_FALSE(size_error);
+    std::filesystem::remove_all(directory, ignored);
+}
+
+TEST(FfmpegTranscodePipelineStreams, usesMp4MuxerCompatibilityIncludingOpus) {
+    const AVOutputFormat* mp4 = av_guess_format("mp4", nullptr, nullptr);
+
+    ASSERT_NE(mp4, nullptr);
+    EXPECT_TRUE(vsr::ffmpeg_muxer_supports_copy(mp4, AV_CODEC_ID_OPUS));
+    EXPECT_TRUE(vsr::ffmpeg_muxer_supports_copy(mp4, AV_CODEC_ID_MOV_TEXT));
+    EXPECT_FALSE(vsr::ffmpeg_muxer_supports_copy(mp4, AV_CODEC_ID_SUBRIP));
+}
+
+TEST(FfmpegTranscodePipelineStreams, copiesInputDisplayMatrixToEncodedVideoParameters) {
+    const auto parameters_deleter = [](AVCodecParameters* parameters) {
+        avcodec_parameters_free(&parameters);
+    };
+    std::unique_ptr<AVCodecParameters, decltype(parameters_deleter)> source(
+        avcodec_parameters_alloc(),
+        parameters_deleter);
+    std::unique_ptr<AVCodecParameters, decltype(parameters_deleter)> destination(
+        avcodec_parameters_alloc(),
+        parameters_deleter);
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(destination, nullptr);
+
+    const std::array<std::int32_t, 9> expected_matrix = {
+        0, 1 << 16, 0,
+        -(1 << 16), 0, 0,
+        0, 0, 1 << 30,
+    };
+    AVPacketSideData* source_matrix = av_packet_side_data_new(
+        &source->coded_side_data,
+        &source->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX,
+        sizeof(expected_matrix),
+        0);
+    ASSERT_NE(source_matrix, nullptr);
+    std::memcpy(source_matrix->data, expected_matrix.data(), sizeof(expected_matrix));
+
+    const auto result = vsr::ffmpeg_copy_display_matrix(source.get(), destination.get());
+
+    ASSERT_TRUE(result.ok()) << result.error().message;
+    const AVPacketSideData* copied_matrix = av_packet_side_data_get(
+        destination->coded_side_data,
+        destination->nb_coded_side_data,
+        AV_PKT_DATA_DISPLAYMATRIX);
+    ASSERT_NE(copied_matrix, nullptr);
+    EXPECT_EQ(copied_matrix->size, sizeof(expected_matrix));
+    EXPECT_NE(copied_matrix->data, source_matrix->data);
+    EXPECT_EQ(std::memcmp(copied_matrix->data, expected_matrix.data(), sizeof(expected_matrix)), 0);
+}
+
+#endif

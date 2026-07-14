@@ -19,8 +19,93 @@ public sealed class ConverterViewModelTests : IDisposable
         await viewModel.InitializeAsync();
         Assert.False(viewModel.IsPrimaryActionEnabled);
 
-        await viewModel.LoadInputAsync("input.mp4");
+        await viewModel.LoadInputAsync(Path.Combine(_directory, "input.mp4"));
         Assert.True(viewModel.IsPrimaryActionEnabled);
+    }
+
+    [Theory]
+    [InlineData("", "未生成")]
+    [InlineData("relative-output", "输出目录无效")]
+    public async Task InvalidOutputDirectoryCannotBeSubmitted(string outputDirectory, string expectedPreview)
+    {
+        var api = new FakeBackendApiClient();
+        await using var process = new FakeBackendProcessService();
+        await using var viewModel = CreateViewModel(api, process);
+
+        await viewModel.InitializeAsync();
+        await viewModel.LoadInputAsync(Path.Combine(_directory, "input.mp4"));
+
+        viewModel.OutputDirectory = outputDirectory;
+
+        Assert.Equal(expectedPreview, viewModel.OutputPath);
+        Assert.False(viewModel.IsPrimaryActionEnabled);
+        Assert.False(viewModel.PrimaryCommand.CanExecute(null));
+
+        await viewModel.PrimaryCommand.ExecuteAsync(null);
+        Assert.Null(api.LastRequest);
+    }
+
+    [Fact]
+    public async Task PollingRecoversWithoutLosingTheActiveJobAfterATransientFailure()
+    {
+        var api = new FakeBackendApiClient { FailFirstJobPoll = true };
+        await using var process = new FakeBackendProcessService();
+        await using var viewModel = CreateViewModel(api, process);
+
+        await viewModel.InitializeAsync();
+        await viewModel.LoadInputAsync(Path.Combine(_directory, "input.mp4"));
+        await viewModel.PrimaryCommand.ExecuteAsync(null);
+
+        await api.FirstJobPollFailed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await WaitUntilAsync(() => viewModel.HasError);
+
+        Assert.True(viewModel.HasActiveJob);
+        Assert.Equal("取消任务", viewModel.PrimaryActionText);
+        Assert.Equal(1, api.CreateJobCallCount);
+
+        await viewModel.PrimaryCommand.ExecuteAsync(null);
+        Assert.Equal(1, api.CancelJobCallCount);
+
+        api.CompleteJob(new JobSnapshot(
+            "job-1",
+            "succeeded",
+            "completed",
+            1,
+            10,
+            10,
+            60,
+            0,
+            Path.Combine(_directory, "input.mp4"),
+            Path.Combine(_directory, "output.mp4"),
+            [],
+            null));
+
+        await WaitUntilAsync(() => !viewModel.HasActiveJob);
+        Assert.Equal(1, api.CreateJobCallCount);
+        Assert.False(viewModel.HasError);
+    }
+
+    [Fact]
+    public async Task InitializationCanBeRetriedAfterRetryExhaustion()
+    {
+        var api = new FakeBackendApiClient { HealthFailuresRemaining = 28 };
+        await using var process = new FakeBackendProcessService();
+        await using var viewModel = CreateViewModel(api, process);
+
+        await viewModel.InitializeAsync();
+
+        Assert.Equal(BackendStatus.Offline, viewModel.BackendStatus);
+        Assert.Equal(28, api.HealthCallCount);
+        Assert.True(viewModel.HasError);
+        Assert.Equal("重试处理引擎", viewModel.PrimaryActionText);
+        Assert.True(viewModel.PrimaryCommand.CanExecute(null));
+
+        await viewModel.PrimaryCommand.ExecuteAsync(null);
+
+        Assert.Equal(BackendStatus.Ready, viewModel.BackendStatus);
+        Assert.Equal(29, api.HealthCallCount);
+        Assert.False(viewModel.HasError);
+        Assert.Equal("开始转码", viewModel.PrimaryActionText);
     }
 
     [Fact]
@@ -130,6 +215,15 @@ public sealed class ConverterViewModelTests : IDisposable
             new JobHistoryService(Path.Combine(_directory, "history.json")));
     }
 
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
@@ -141,11 +235,28 @@ public sealed class ConverterViewModelTests : IDisposable
     private sealed class FakeBackendApiClient : IBackendApiClient
     {
         private readonly TaskCompletionSource<MediaProbeResponse> _firstProbe = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<JobSnapshot> _completedJob = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _jobPollCallCount;
         public TaskCompletionSource FirstProbeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FirstJobPollFailed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TranscodeRequest? LastRequest { get; private set; }
+        public bool FailFirstJobPoll { get; init; }
+        public int HealthFailuresRemaining { get; set; }
+        public int HealthCallCount { get; private set; }
+        public int CreateJobCallCount { get; private set; }
+        public int CancelJobCallCount { get; private set; }
 
-        public Task<HealthResponse> GetHealthAsync(CancellationToken token = default) =>
-            Task.FromResult(new HealthResponse("test", true));
+        public Task<HealthResponse> GetHealthAsync(CancellationToken token = default)
+        {
+            HealthCallCount++;
+            if (HealthFailuresRemaining > 0)
+            {
+                HealthFailuresRemaining--;
+                throw new BackendApiException("network_error", "后端服务不可用。", "transient test failure", 0);
+            }
+
+            return Task.FromResult(new HealthResponse("test", true));
+        }
 
         public Task<CapabilityResponse> GetCapabilitiesAsync(CancellationToken token = default) =>
             Task.FromResult(new CapabilityResponse(true, true, true, true, true, true, true, []));
@@ -164,13 +275,30 @@ public sealed class ConverterViewModelTests : IDisposable
         public void CompleteFirstProbe() => _firstProbe.TrySetResult(Media("first.mp4"));
         public Task<CreateJobResponse> CreateJobAsync(TranscodeRequest request, CancellationToken token = default)
         {
+            CreateJobCallCount++;
             LastRequest = request;
             return Task.FromResult(new CreateJobResponse("job-1"));
         }
-        public Task<JobSnapshot> GetJobAsync(string id, CancellationToken token = default) => throw new NotSupportedException();
-        public Task CancelJobAsync(string id, CancellationToken token = default) => Task.CompletedTask;
+        public async Task<JobSnapshot> GetJobAsync(string id, CancellationToken token = default)
+        {
+            var call = Interlocked.Increment(ref _jobPollCallCount);
+            if (FailFirstJobPoll && call == 1)
+            {
+                FirstJobPollFailed.TrySetResult();
+                throw new BackendApiException("network_error", "后端服务不可用。", "transient test failure", 0);
+            }
+
+            return await _completedJob.Task.WaitAsync(token);
+        }
+        public Task CancelJobAsync(string id, CancellationToken token = default)
+        {
+            CancelJobCallCount++;
+            return Task.CompletedTask;
+        }
         public Task ShutdownAsync(CancellationToken token = default) => Task.CompletedTask;
         public void Dispose() { }
+
+        public void CompleteJob(JobSnapshot snapshot) => _completedJob.TrySetResult(snapshot);
 
         private static MediaProbeResponse Media(string path) =>
             new(path, Path.GetFileName(path), 1024, "1920x1080", "00:00:01", "h264 8-bit", []);

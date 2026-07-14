@@ -16,10 +16,12 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? _probeCancellation;
     private MediaProbeResponse? _media;
     private CapabilityResponse? _capabilities;
+    private string? _resolvedOutputPath;
     private string? _activeJobId;
     private Task? _pollingTask;
     private long _probeGeneration;
     private bool _initialized;
+    private bool _initializing;
     private bool _disposed;
 
     public ConverterViewModel(
@@ -104,7 +106,7 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
     public bool IsVsrConfigurationEnabled => SelectedMode != ProcessingMode.Hdr && IsVsrAvailable && !HasActiveJob;
     public bool IsHdrConfigurationEnabled => SelectedMode != ProcessingMode.Vsr && IsHdrAvailable && !HasActiveJob;
     public bool IsEditingEnabled => !HasActiveJob;
-    public bool IsPrimaryActionEnabled => HasActiveJob || CanStart;
+    public bool IsPrimaryActionEnabled => CanRetryInitialization || HasActiveJob || CanStart;
     public bool IsH264CodecOptionEnabled => IsH264Available && SelectedMode == ProcessingMode.Vsr;
     public bool IsHevcCodecOptionEnabled => IsHevcAvailable;
     public bool IsAv1CodecOptionEnabled => IsAv1Available;
@@ -113,12 +115,27 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        if (_initialized || _disposed)
+        if (_initialized || _initializing || _disposed)
         {
             return;
         }
 
-        _initialized = true;
+        _initializing = true;
+        HasError = false;
+        RefreshState();
+        try
+        {
+            await InitializeCoreAsync();
+        }
+        finally
+        {
+            _initializing = false;
+            RefreshState();
+        }
+    }
+
+    private async Task InitializeCoreAsync()
+    {
         if (Environment.GetEnvironmentVariable("RTX_UI_DESIGN_PREVIEW") == "1")
         {
             ApplyCapabilities(new CapabilityResponse(true, true, true, true, true, true, true, []));
@@ -129,6 +146,7 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
                 ProgressPercent = Math.Clamp(previewProgress, 0, 100);
                 ProgressText = $"{Math.Round(ProgressPercent)}%";
             }
+            _initialized = true;
             RefreshState();
             return;
         }
@@ -152,6 +170,8 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
                 BackendMessage = _capabilities?.Messages.Count > 0
                     ? "后端已连接，部分 RTX 能力不可用。"
                     : "后端已就绪，可以开始转码任务。";
+                _initialized = true;
+                HasError = false;
                 RefreshState();
                 return;
             }
@@ -293,6 +313,7 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
             }
 
             _media = null;
+            _resolvedOutputPath = null;
             FileName = "探测失败";
             FileSize = Resolution = Duration = SourceCodec = "-";
             OutputPath = "未生成";
@@ -347,6 +368,12 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanExecutePrimary))]
     private async Task PrimaryAsync()
     {
+        if (CanRetryInitialization)
+        {
+            await InitializeAsync();
+            return;
+        }
+
         if (HasActiveJob)
         {
             await CancelActiveJobAsync();
@@ -390,10 +417,41 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
+            var hadPollingFailure = false;
+            var pollingErrorMessage = string.Empty;
             while (!_lifetime.IsCancellationRequested && string.Equals(_activeJobId, id, StringComparison.Ordinal))
             {
-                await Task.Delay(500, _lifetime.Token);
-                var job = await _api.GetJobAsync(id, _lifetime.Token);
+                JobSnapshot job;
+                try
+                {
+                    await Task.Delay(500, _lifetime.Token);
+                    job = await _api.GetJobAsync(id, _lifetime.Token);
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    hadPollingFailure = true;
+                    JobStatusText = "状态：暂时无法获取任务进度 · 正在重试";
+                    ActionHint = "与处理引擎的连接暂时中断；任务仍在后台运行，也可以继续取消。";
+                    ShowError(ex);
+                    pollingErrorMessage = ErrorMessage;
+                    RefreshState();
+                    continue;
+                }
+
+                if (hadPollingFailure)
+                {
+                    hadPollingFailure = false;
+                    ActionHint = "转换期间参数已锁定。";
+                    if (HasError && string.Equals(ErrorMessage, pollingErrorMessage, StringComparison.Ordinal))
+                    {
+                        HasError = false;
+                    }
+                }
+
                 ApplyJob(job);
 
                 if (!ActiveStates.Contains(job.State))
@@ -456,6 +514,8 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
 
     private TranscodeRequest BuildRequest()
     {
+        var outputPath = _resolvedOutputPath
+            ?? throw new InvalidOperationException("请选择有效的绝对输出目录。");
         var codec = SelectedCodecIndex switch
         {
             0 => "h264",
@@ -464,7 +524,7 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
         };
         return new TranscodeRequest(
             _media!.Path,
-            OutputPath,
+            outputPath,
             new ProcessingOptions(
                 new VsrOptions(SelectedMode is ProcessingMode.Vsr or ProcessingMode.Both, SelectedQuality, ScaleFactor),
                 new HdrOptions(
@@ -519,7 +579,9 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
 
     private bool CanEdit() => !HasActiveJob && !_disposed;
     private bool CanExecutePrimary() => !_disposed && IsPrimaryActionEnabled;
-    private bool CanStart => _media is not null && _capabilities is not null && !IsProbing && !HasActiveJob &&
+    private bool CanRetryInitialization =>
+        BackendStatus == BackendStatus.Offline && !_initialized && !_initializing;
+    private bool CanStart => _media is not null && _capabilities is not null && _resolvedOutputPath is not null && !IsProbing && !HasActiveJob &&
         IsModeAvailable(SelectedMode) && IsSelectedCodecAvailable();
 
     private bool IsModeAvailable(ProcessingMode mode) => mode switch
@@ -573,16 +635,31 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
 
         if (!HasActiveJob)
         {
-            PrimaryActionText = "开始转码";
-            ActionHint = _capabilities is null
-                ? "正在等待处理引擎。"
-                : _media is null
-                    ? "请选择并成功探测输入视频。"
-                    : !IsModeAvailable(SelectedMode)
-                        ? "当前处理模式不可用。"
-                        : !IsSelectedCodecAvailable()
-                            ? "当前输出编码不可用。"
-                        : "所有设置已就绪。";
+            if (_initializing)
+            {
+                PrimaryActionText = "正在连接…";
+                ActionHint = "正在连接处理引擎。";
+            }
+            else if (CanRetryInitialization)
+            {
+                PrimaryActionText = "重试处理引擎";
+                ActionHint = "本机处理引擎不可用，可以重试启动。";
+            }
+            else
+            {
+                PrimaryActionText = "开始转码";
+                ActionHint = _capabilities is null
+                    ? "正在等待处理引擎。"
+                    : _media is null
+                        ? "请选择并成功探测输入视频。"
+                        : _resolvedOutputPath is null
+                            ? "请选择有效的绝对输出目录。"
+                        : !IsModeAvailable(SelectedMode)
+                            ? "当前处理模式不可用。"
+                            : !IsSelectedCodecAvailable()
+                                ? "当前输出编码不可用。"
+                                : "所有设置已就绪。";
+            }
         }
 
         PickInputCommand.NotifyCanExecuteChanged();
@@ -592,20 +669,35 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
 
     private void UpdateOutputPath()
     {
+        _resolvedOutputPath = null;
         if (_media is null || string.IsNullOrWhiteSpace(OutputDirectory))
         {
             OutputPath = "未生成";
+            RefreshState();
             return;
         }
 
         try
         {
-            OutputPath = Path.Combine(OutputDirectory.Trim(), $"{Path.GetFileNameWithoutExtension(_media.Name)} RTX Converter.mp4");
+            var directory = OutputDirectory.Trim();
+            if (!Path.IsPathFullyQualified(directory))
+            {
+                OutputPath = "输出目录无效";
+                RefreshState();
+                return;
+            }
+
+            _resolvedOutputPath = Path.GetFullPath(Path.Combine(
+                directory,
+                $"{Path.GetFileNameWithoutExtension(_media.Name)} RTX Converter.mp4"));
+            OutputPath = _resolvedOutputPath;
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
             OutputPath = "输出目录无效";
         }
+
+        RefreshState();
     }
 
     [RelayCommand]

@@ -4,7 +4,11 @@ namespace vsr {
 
 FakePipeline::FakePipeline(FakePipelineMode mode) : mode_(mode) {}
 
-Result<void> FakePipeline::run(const TranscodeRequest&, CancellationToken& cancellation, ProgressCallback progress) {
+Result<void> FakePipeline::run(
+    const TranscodeRequest&,
+    CancellationToken& cancellation,
+    ProgressCallback progress,
+    WarningCallback) {
     for (int i = 0; i <= 4; ++i) {
         if (cancellation.requested.load()) {
             return Result<void>::Fail({"job_canceled", "Job was canceled.", ""});

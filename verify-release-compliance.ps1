@@ -3,7 +3,7 @@ param(
     [string]$PublishDirectory,
     [string]$FfmpegArtifactRoot = "",
     [string]$ThirdPartyNoticesDirectory = "",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 
 $ErrorActionPreference = "Stop"

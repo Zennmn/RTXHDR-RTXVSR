@@ -19,6 +19,7 @@ public:
     Result<TranscodeRequest> start(const std::string& id);
     Result<void> mark_running(const std::string& id);
     Result<void> update_progress(const std::string& id, const JobProgress& progress);
+    Result<void> add_warning(const std::string& id, const std::string& warning);
     Result<void> mark_succeeded(const std::string& id);
     Result<void> mark_failed(const std::string& id, const Error& error);
     Result<void> request_cancel(const std::string& id);
