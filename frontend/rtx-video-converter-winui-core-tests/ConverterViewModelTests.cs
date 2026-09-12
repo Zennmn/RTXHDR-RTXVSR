@@ -9,6 +9,43 @@ public sealed class ConverterViewModelTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), $"rtx-core-tests-{Guid.NewGuid():N}");
 
+    [Theory]
+    [InlineData(0, 200, 10, 400)]
+    [InlineData(75, 125, 44, 1000)]
+    [InlineData(100, 100, 44, 1000)]
+    [InlineData(125, 75, 50, 1500)]
+    [InlineData(200, 0, 100, 2000)]
+    public async Task HdrOptionsAreSubmittedUnchangedAcrossSupportedRange(
+        int contrast, int saturation, int middleGray, int maxLuminance)
+    {
+        var api = new FakeBackendApiClient();
+        await using var process = new FakeBackendProcessService();
+        await using var viewModel = CreateViewModel(api, process);
+        await viewModel.InitializeAsync();
+        await viewModel.LoadInputAsync(Path.Combine(_directory, "input.mp4"));
+        viewModel.SelectedMode = ProcessingMode.Hdr;
+        Assert.Equal(100, viewModel.Contrast);
+        Assert.Equal(100, viewModel.Saturation);
+        Assert.Equal(44, viewModel.MiddleGray);
+        Assert.Equal(1000, viewModel.MaxLuminance);
+        Assert.Contains(contrast, viewModel.ContrastOptions);
+        Assert.Contains(saturation, viewModel.SaturationOptions);
+        Assert.Contains(middleGray, viewModel.MiddleGrayOptions);
+        Assert.Contains(maxLuminance, viewModel.LuminanceOptions);
+        viewModel.Contrast = contrast;
+        viewModel.Saturation = saturation;
+        viewModel.MiddleGray = middleGray;
+        viewModel.MaxLuminance = maxLuminance;
+
+        await viewModel.PrimaryCommand.ExecuteAsync(null);
+
+        var request = Assert.IsType<TranscodeRequest>(api.LastRequest);
+        Assert.False(request.Processing.Vsr.Enabled);
+        Assert.Equal(new HdrOptions(true, contrast, saturation, middleGray, maxLuminance), request.Processing.Hdr);
+        Assert.Equal(contrast, viewModel.Contrast);
+        Assert.Equal(saturation, viewModel.Saturation);
+    }
+
     [Fact]
     public async Task PrimaryActionRequiresSuccessfullyProbedMedia()
     {

@@ -222,7 +222,7 @@ void set_optional_encoder_option_int(AVCodecContext* context, const char* name, 
     }
 }
 
-Result<void> configure_nvenc_quality(AVCodecContext* context, bool enable_split_encode) {
+Result<void> configure_nvenc_quality(AVCodecContext* context, const OutputSettings& output, bool enable_split_encode) {
     for (const auto& option : {
              std::pair<const char*, const char*>{"preset", "p7"},
              std::pair<const char*, const char*>{"tune", "hq"},
@@ -234,7 +234,7 @@ Result<void> configure_nvenc_quality(AVCodecContext* context, bool enable_split_
         }
     }
 
-    const auto cq = set_required_encoder_option_double(context, "cq", 18.0);
+    const auto cq = set_required_encoder_option_double(context, "cq", nvenc_target_quality(output.video_codec));
     if (!cq.ok()) {
         return cq;
     }
@@ -1049,12 +1049,32 @@ Result<void> FfmpegTranscodePipeline::run(
     }
     const auto quality_configured = configure_nvenc_quality(
         encoder_context.get(),
+        request.output,
         hevc_encoder || av1_encoder);
     if (!quality_configured.ok()) {
         return Result<void>::Fail(quality_configured.error());
     }
+    if (av1_encoder) {
+        const auto level = select_av1_level(
+            output_width, output_height, av_q2d(frame_rate),
+            encoder_context->rc_max_rate, encoder_context->rc_buffer_size);
+        if (!level.ok()) {
+            return Result<void>::Fail(level.error());
+        }
+        const auto set_level = set_required_encoder_option_int(encoder_context.get(), "level", level.value().index);
+        if (!set_level.ok()) {
+            return set_level;
+        }
+        const auto set_tier = set_required_encoder_option_int(encoder_context.get(), "tier", level.value().tier);
+        if (!set_tier.ok()) {
+            return set_tier;
+        }
+        log_info("AV1 level configured: index=" + std::to_string(level.value().index) +
+            ", tier=" + std::to_string(level.value().tier));
+    }
     log_info(
         "NVENC quality configured: encoder=" + std::string(encoder_name) +
+        ", cq=" + std::to_string(nvenc_target_quality(request.output.video_codec)) +
         ", target_bitrate=" + std::to_string(target_bit_rate) +
         ", maxrate=" + std::to_string(encoder_context->rc_max_rate) +
         ", buffer=" + std::to_string(encoder_context->rc_buffer_size));

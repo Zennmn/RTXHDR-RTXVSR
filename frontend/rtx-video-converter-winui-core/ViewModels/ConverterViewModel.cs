@@ -99,9 +99,9 @@ public partial class ConverterViewModel : ObservableObject, IAsyncDisposable
         }
     }
     public string QualityText => $"质量 {SelectedQuality}";
-    public IReadOnlyList<int> ContrastOptions { get; } = [50, 75, 100, 125, 150];
-    public IReadOnlyList<int> SaturationOptions { get; } = [50, 75, 100, 125, 150];
-    public IReadOnlyList<int> MiddleGrayOptions { get; } = [18, 36, 44, 50, 60];
+    public IReadOnlyList<int> ContrastOptions { get; } = [0, 25, 50, 75, 100, 125, 150, 175, 200];
+    public IReadOnlyList<int> SaturationOptions { get; } = [0, 25, 50, 75, 100, 125, 150, 175, 200];
+    public IReadOnlyList<int> MiddleGrayOptions { get; } = [10, 18, 36, 44, 50, 60, 70, 80, 90, 100];
     public IReadOnlyList<int> LuminanceOptions { get; } = [400, 600, 1000, 1500, 2000];
     public bool IsVsrConfigurationEnabled => SelectedMode != ProcessingMode.Hdr && IsVsrAvailable && !HasActiveJob;
     public bool IsHdrConfigurationEnabled => SelectedMode != ProcessingMode.Vsr && IsHdrAvailable && !HasActiveJob;

@@ -77,6 +77,60 @@ TEST(FfmpegTranscodePipelineOptions, choosesAv1NvencWhenRequested) {
     EXPECT_STREQ(vsr::ffmpeg_nvenc_encoder_name(output), "av1_nvenc");
 }
 
+TEST(NvencPolicy, usesCodecSpecificQualityWithoutChangingHevcOrH264) {
+    EXPECT_DOUBLE_EQ(vsr::nvenc_target_quality("av1"), 24.0);
+    EXPECT_DOUBLE_EQ(vsr::nvenc_target_quality("hevc"), 18.0);
+    EXPECT_DOUBLE_EQ(vsr::nvenc_target_quality("h264"), 18.0);
+}
+
+TEST(NvencPolicy, selectsDefinedLevelsForCommonOutputSizes) {
+    struct Case { int width; int height; double fps; std::int64_t rate; std::int64_t buffer; int level; int tier; };
+    for (const auto& c : {
+        Case{1920, 1080, 30.0, 8'000'000, 10'000'000, 8, 0},
+        Case{1920, 1080, 60.0, 15'000'000, 20'000'000, 9, 0},
+        Case{3840, 2160, 30.0, 45'000'000, 60'000'000, 12, 1},
+        Case{3840, 2160, 60000.0/1001.0, 90'000'000, 120'000'000, 13, 1},
+        Case{3840, 2160, 120.0, 180'000'000, 240'000'000, 14, 1},
+        Case{7680, 4320, 30.0, 180'000'000, 240'000'000, 16, 1},
+        Case{7680, 4320, 60.0, 240'000'000, 320'000'000, 17, 1},
+        Case{7680, 4320, 120.0, 240'000'000, 320'000'000, 18, 1},
+    }) {
+        const auto selected = vsr::select_av1_level(c.width, c.height, c.fps, c.rate, c.buffer);
+        ASSERT_TRUE(selected.ok());
+        EXPECT_EQ(selected.value().index, c.level);
+        EXPECT_EQ(selected.value().tier, c.tier);
+    }
+}
+
+TEST(NvencPolicy, accountsForBitrateBufferAndDimensionLimits) {
+    const auto main = vsr::select_av1_level(3840, 2160, 60, 40'000'000, 40'000'000);
+    ASSERT_TRUE(main.ok());
+    EXPECT_EQ(main.value().index, 13);
+    EXPECT_EQ(main.value().tier, 0);
+    const auto high = vsr::select_av1_level(3840, 2160, 60, 40'000'000, 40'000'001);
+    ASSERT_TRUE(high.ok());
+    EXPECT_EQ(high.value().tier, 1);
+    const auto bigger = vsr::select_av1_level(3840, 2160, 60, 160'000'001, 160'000'001);
+    ASSERT_TRUE(bigger.ok());
+    EXPECT_EQ(bigger.value().index, 14);
+    const auto wide = vsr::select_av1_level(9000, 100, 30, 10'000'000, 10'000'000);
+    ASSERT_TRUE(wide.ok());
+    EXPECT_EQ(wide.value().index, 16);
+}
+
+TEST(NvencPolicy, rejectsInvalidOrUnsupportedOutputsInsteadOfUsingAutoLevel) {
+    EXPECT_FALSE(vsr::select_av1_level(0, 2160, 60, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, NAN, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, INFINITY, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, 0, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, 60, -1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, 60, 1, 0).ok());
+    EXPECT_FALSE(vsr::select_av1_level(17000, 100, 30, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(7680, 4320, 240, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(1920, 1080, 301, 1, 1).ok());
+    EXPECT_FALSE(vsr::select_av1_level(3840, 2160, 60, 800'000'001, 1).ok());
+}
+
 TEST(FfmpegTranscodePipelineOptions, detectsDefaultCopyModes) {
     vsr::OutputSettings output;
 

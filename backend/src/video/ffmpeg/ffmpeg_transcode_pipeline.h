@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/utf8_path.h"
+#include "video/ffmpeg/nvenc_policy.h"
 #include "video/rtx/rtx_processor.h"
 #include "video/video_pipeline.h"
 
